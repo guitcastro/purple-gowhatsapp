@@ -7,20 +7,19 @@
  * Whether the given pointer actually refers to an existing account.
  */
 int gowhatsapp_account_exists(PurpleAccount *account) {
-    int account_exists = 0;
-    // this would be more elegant, but bitlbee does not implement purple_accounts_get_all()
-    // see https://github.com/hoehermann/purple-gowhatsapp/issues/102
-    // for (GList *iter = purple_accounts_get_all(); iter != NULL && account_exists == 0; iter = iter->next) {
-    //     PurpleAccount * acc = (PurpleAccount *)iter->data;
-    //     account_exists = acc == account;
-    // }
-    for (GList *iter = purple_connections_get_connecting(); iter != NULL && account_exists == 0; iter = iter->next) {
-        PurpleAccount * acc = purple_connection_get_account(iter->data);
-        account_exists = acc == account;
+    PurpleAccountManager *manager = purple_core_get_account_manager(purple_core_get_default());
+    if (manager == NULL) {
+        return 0;
     }
-    for (GList *iter = purple_connections_get_all(); iter != NULL && account_exists == 0; iter = iter->next) {
-        PurpleAccount * acc = purple_connection_get_account(iter->data);
-        account_exists = acc == account;
+    GListModel *accounts = purple_account_manager_get_connected_accounts(manager);
+    guint n = g_list_model_get_n_items(accounts);
+    int account_exists = 0;
+    for (guint i = 0; i < n && !account_exists; i++) {
+        PurpleAccount *acc = PURPLE_ACCOUNT(g_list_model_get_item(accounts, i));
+        if (acc == account) {
+            account_exists = 1;
+        }
+        g_object_unref(acc);
     }
     return account_exists;
 }
@@ -39,8 +38,7 @@ void gowhatsapp_process_message_bridge(gowhatsapp_message_t gwamsg_go) {
     // copying Go-managed struct into heap
     // the strings inside the struct already reside in the heap, according to https://golang.org/cmd/cgo/#hdr-C_references_to_Go
     gowhatsapp_message_t *gwamsg_heap = g_memdup2(&gwamsg_go, sizeof gwamsg_go);
-    purple_timeout_add(
-        0, // schedule for immediate execution
+    g_idle_add(
         process_message_bridge, // handle message in main thread
         gwamsg_heap // data to handle in main thread
     );

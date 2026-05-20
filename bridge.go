@@ -42,7 +42,6 @@ import (
 )
 
 type PurpleAccount = C.PurpleAccount
-type PurpleXfer = C.PurpleXfer
 
 // TODO: find out how to enable C99's bool type in cgo
 func bool_to_Cchar(b bool) C.char {
@@ -586,7 +585,7 @@ func purple_error(account *PurpleAccount, message string, fatal bool) {
  */
 func purple_get_int(account *PurpleAccount, key *C.char, default_value int) int {
 	if C.gowhatsapp_account_exists(account) == 1 {
-		return int(C.purple_account_get_int(account, key, C.int(default_value)))
+		return int(C.purple_account_settings_get_int(C.purple_account_get_settings(account), key, C.int(default_value)))
 	}
 	return default_value
 }
@@ -596,7 +595,7 @@ func purple_get_int(account *PurpleAccount, key *C.char, default_value int) int 
  */
 func purple_get_bool(account *PurpleAccount, key *C.char, default_value bool) bool {
 	if C.gowhatsapp_account_exists(account) == 1 {
-		return Cint_to_bool(C.purple_account_get_bool(account, key, C.int(bool_to_Cchar(default_value))))
+		return Cint_to_bool(C.purple_account_settings_get_boolean(C.purple_account_get_settings(account), key, C.int(bool_to_Cchar(default_value))))
 	}
 	return default_value
 }
@@ -606,7 +605,7 @@ func purple_get_bool(account *PurpleAccount, key *C.char, default_value bool) bo
  */
 func purple_get_string(account *PurpleAccount, key *C.char, default_value *C.char) string {
 	if C.gowhatsapp_account_exists(account) == 1 {
-		return C.GoString(C.purple_account_get_string(account, key, default_value))
+		return C.GoString(C.purple_account_settings_get_string(C.purple_account_get_settings(account), key, default_value))
 	}
 	return C.GoString(default_value)
 }
