@@ -1,5 +1,30 @@
 #include <purple.h>
 
+#if PURPLE_API_MAJOR_VERSION >= 3
+/*
+ * libpurple 3 compatibility shims.
+ *
+ * Many libpurple 2 type names were removed or renamed in libpurple 3.
+ * The aliases below make the existing headers parse against libpurple 3
+ * so that the source files can be ported one at a time. Call sites that
+ * use removed APIs will still fail to compile/link until the
+ * corresponding .c file is ported.
+ */
+typedef PurpleFileTransfer PurpleXfer;
+typedef PurpleConversation PurpleConvChat;
+typedef PurpleConversation PurpleChat;
+typedef PurpleContactInfo  PurpleBuddy;
+/* No libpurple 3 equivalents — opaque placeholders just to make the header parse. */
+typedef struct _PurpleRoomlist        PurpleRoomlist;
+typedef struct _PurpleRoomlistRoom    PurpleRoomlistRoom;
+typedef struct _PurpleGroup           PurpleGroup;
+typedef struct _PurpleNotifyUserInfo  PurpleNotifyUserInfo;
+/* PurpleMessageFlags was a bitmask; libpurple 3 exposes message metadata via
+ * PurpleMessage getters/setters instead. Treat the flags as an opaque int
+ * during the port so existing prototypes still parse. */
+typedef guint PurpleMessageFlags;
+#endif
+
 #define PURPLE_XFER_TYPE_SEND PURPLE_XFER_SEND
 #define PURPLE_IS_CHAT PURPLE_BLIST_NODE_IS_CHAT
 #define purple_connection_error purple_connection_error_reason
