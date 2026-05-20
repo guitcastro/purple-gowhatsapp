@@ -65,10 +65,7 @@ purple_gowhatsapp_connection_connect(PurpleConnection *purple_connection,
     username = (char *)purple_contact_info_get_id(PURPLE_CONTACT_INFO(account));
     user_dir = (char *)g_get_user_data_dir();
     gowhatsapp_go_login(account, user_dir, username, (char *)credentials, NULL);
-
-    /* TODO(libpurple-3): port glue/receipt.c then re-enable:
-     *     gowhatsapp_receipts_init(purple_connection);
-     */
+    gowhatsapp_receipts_init(purple_connection);
 
     return TRUE;
 }
