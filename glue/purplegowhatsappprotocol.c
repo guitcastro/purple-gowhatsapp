@@ -17,13 +17,25 @@ purple_gowhatsapp_protocol_conversation_iface_init(PurpleProtocolConversationInt
     iface->send_message_finish = gowhatsapp_send_message_finish;
 }
 
+/******************************************************************************
+ * PurpleProtocolFileTransfer Implementation
+ *****************************************************************************/
+static void
+purple_gowhatsapp_protocol_file_transfer_iface_init(PurpleProtocolFileTransferInterface *iface)
+{
+    iface->send_async  = gowhatsapp_send_async;
+    iface->send_finish = gowhatsapp_send_finish;
+}
+
 G_DEFINE_DYNAMIC_TYPE_EXTENDED(
     PurpleGowhatsappProtocol,
     purple_gowhatsapp_protocol,
     PURPLE_TYPE_PROTOCOL,
     G_TYPE_FLAG_FINAL,
     G_IMPLEMENT_INTERFACE_DYNAMIC(PURPLE_TYPE_PROTOCOL_CONVERSATION,
-                                  purple_gowhatsapp_protocol_conversation_iface_init))
+                                  purple_gowhatsapp_protocol_conversation_iface_init)
+    G_IMPLEMENT_INTERFACE_DYNAMIC(PURPLE_TYPE_PROTOCOL_FILE_TRANSFER,
+                                  purple_gowhatsapp_protocol_file_transfer_iface_init))
 
 static PurpleConnection *
 purple_gowhatsapp_protocol_create_connection(G_GNUC_UNUSED PurpleProtocol *protocol,

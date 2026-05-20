@@ -79,10 +79,14 @@ gboolean gowhatsapp_send_message_finish(PurpleProtocolConversation *protocol,
 void gowhatsapp_handle_attachment(gowhatsapp_message_t *gwamsg);
 char * gowhatsapp_attachment_fill_template(const char *template, time_t timestamp, const char *hash, const char *filename, const char *extension, const char *remote, const char *sender, const char *title, const char *alias, const char *messageid, PurpleMessageFlags flags);
 
-// send_file
-PurpleXfer * gowhatsapp_new_xfer(PurpleConnection *pc, const char *who);
-void gowhatsapp_send_file(PurpleConnection *pc, const gchar *who, const gchar *filename);
-void gowhatsapp_chat_send_file(PurpleConnection *pc, int id, const char *filename);
+// send_file (PurpleProtocolFileTransfer interface)
+void     gowhatsapp_send_async(PurpleProtocolFileTransfer *protocol,
+                               PurpleFileTransfer *transfer,
+                               GAsyncReadyCallback callback,
+                               gpointer data);
+gboolean gowhatsapp_send_finish(PurpleProtocolFileTransfer *protocol,
+                                GAsyncResult *result,
+                                GError **error);
 
 // presence
 void gowhatsapp_handle_presence(PurpleAccount *account, char *remoteJid, char available, time_t last_seen);
