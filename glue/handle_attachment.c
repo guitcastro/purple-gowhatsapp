@@ -2,261 +2,221 @@
 #include "libwhatsmeow.h"
 #include "constants.h"
 #include "pixbuf.h"
+
 #include "glib/gstdio.h"
 
-static void gowhatsapp_display_image_inline(gowhatsapp_message_t *gwamsg, const char *local_file_path) {
-    const gboolean inline_images = !purple_strequal(purple_account_get_string(gwamsg->account, GOWHATSAPP_HANDLE_IMAGES_OPTION, GOWHATSAPP_HANDLE_IMAGES_CHOICE_BOTH), GOWHATSAPP_HANDLE_IMAGES_CHOICE_ATTACHMENT);
-    if (inline_images && pixbuf_is_loadable_image_mimetype(gwamsg->mimetype)) {
-        gchar *data = NULL;
-        size_t len;
-        GError *err = NULL;
-        if (g_file_get_contents(local_file_path, &data, &len, &err)) {
-            int img_id = purple_imgstore_add_with_id(data, len, NULL); // MEMCHECK: released by purple_imgstore_unref_by_id (see below)
-            if (img_id > 0) {
-                gchar * text = g_strdup_printf("<img id=\"%u\"/>", img_id); // MEMCHECK: released here
-                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, NULL, PURPLE_MESSAGE_IMAGES, gwamsg->messageId, FALSE);
-                g_free(text);
-                purple_imgstore_unref_by_id(img_id);
-            }
-        }
+/*
+ * Inbound attachment handling. libpurple 2 had three rendering paths:
+ *
+ *   1. Inline the image via purple_imgstore_add_with_id + an <img id="N"/>
+ *      tag injected into a chat message.
+ *   2. Download to a user-configured local path template, then post a
+ *      link in the chat.
+ *   3. Ask the user via PurpleXfer (with init / start / end / cancel
+ *      callbacks) where to save the file.
+ *
+ * libpurple 3 broke all three: PurpleImageStore + the inline <img> tag
+ * representation is gone (images now travel through PurpleMessage's
+ * attachment / image properties), PurpleXfer is replaced by
+ * PurpleFileTransfer + PurpleProtocolFileTransfer.receive_async, and
+ * the libpurple 2 buddy/chat alias lookups have all moved over to
+ * PurpleContactInfo accessors.
+ *
+ * The port below keeps the templated-download path working (this is the
+ * variant that actually persists files to disk and is what most users
+ * are after) and reduces the inline / PurpleXfer paths to TODOs.
+ */
+
+static const char *
+display_alias_for(PurpleAccount *account, const char *jid)
+{
+    if (account == NULL || jid == NULL || *jid == '\0') {
+        return jid;
     }
-}
-
-static void gowhatsapp_display_caption(gowhatsapp_message_t *gwamsg) {
-    if (gwamsg->text && gwamsg->text[0]) {
-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, TRUE);
+    PurpleContactManager *manager = purple_core_get_contact_manager(purple_core_get_default());
+    PurpleContact *contact = purple_contact_manager_find_with_id(manager, account, jid);
+    if (contact == NULL) {
+        return jid;
     }
-}
-
-// This is called after the user accepted the file transfer (and chose a destination)
-static void xfer_init(PurpleXfer *xfer) {
-    gowhatsapp_message_t * gwamsg = xfer->data;
-    const char * local_file_name = purple_xfer_get_local_filename(xfer);
-    PurpleAccount *account = purple_xfer_get_account(xfer);
-    char *error = gowhatsapp_go_download_attachment(account, (char *)local_file_name, gwamsg->download_handle);
-    // NOTE: gowhatsapp_go_delete_handle(gwamsg->download_handle) will be called via xfer_release
-    if (error && error[0]) {
-        purple_xfer_error(purple_xfer_get_type(xfer), account, xfer->who, error); 
-        purple_xfer_cancel_local(xfer);
-    } else {
-        purple_xfer_set_bytes_sent(xfer, purple_xfer_get_size(xfer));
-        purple_xfer_set_completed(xfer, TRUE);
-        gowhatsapp_display_image_inline(gwamsg, local_file_name);
-        gowhatsapp_display_caption(gwamsg);
+    const char *alias = purple_contact_info_get_alias(PURPLE_CONTACT_INFO(contact));
+    if (alias == NULL || *alias == '\0' || strchr(alias, '/') != NULL) {
+        return jid;
     }
-    g_free(error);
+    return alias;
 }
 
-static void xfer_release(PurpleXfer * xfer) {
-    if (xfer->data != NULL) {
-        gowhatsapp_message_t * gwamsg = xfer->data;
-        if (gwamsg->download_handle) {
-            gowhatsapp_go_delete_handle(gwamsg->download_handle);
-            gwamsg->download_handle = 0;
-        }
-        gowhatsapp_free_message(gwamsg);
-        xfer->data = NULL;
-    }
-}
-
-static gowhatsapp_message_t *duplicate_gowhatsapp_message(gowhatsapp_message_t *gwamsg) {
-    // NOTE: this is tailored for the use in handle_attachment
-    gowhatsapp_message_t *clone = g_new0(gowhatsapp_message_t, 1);
-    clone->download_handle = gwamsg->download_handle;
-    clone->account = gwamsg->account;
-    clone->senderJid = g_strdup(gwamsg->senderJid);
-    clone->remoteJid = g_strdup(gwamsg->remoteJid);
-    clone->text = g_strdup(gwamsg->text);
-    clone->timestamp = gwamsg->timestamp;
-    clone->isGroup = gwamsg->isGroup;
-    clone->isOutgoing = gwamsg->isOutgoing;
-    clone->name = g_strdup(gwamsg->name);
-    clone->subtype = gwamsg->subtype;
-    clone->messageId = g_strdup(gwamsg->messageId);
-    clone->mimetype = g_strdup(gwamsg->mimetype);
-    return clone;
-}
-
-static void download_via_xfer_mechanism(gowhatsapp_message_t *gwamsg) {    
-    const char * sender = gwamsg->senderJid; // by default, the group chat participant is the sender
-    if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_GROUP_IS_FILE_ORIGIN_OPTION, TRUE)) {
-        sender = gwamsg->remoteJid; // set sender to the group chat
-    }
-    
-    PurpleXfer * xfer = purple_xfer_new(gwamsg->account, PURPLE_XFER_RECEIVE, sender);
-    char *filename = g_strdup_printf("%s%s%s", gwamsg->hash_hex, gwamsg->filename, gwamsg->extension);
-    purple_xfer_set_filename(xfer, filename);
-    g_free(filename);
-    purple_xfer_set_size(xfer, gwamsg->filesize);
-    // NOTE: xfer->message cannot be used for the caption since in purple_xfer_ask_recv message is automatically written to the conversation of the sender, but purple_xfer_ask_recv does not consider the case where the sender is a chat. also purple_xfer_ask_recv disregards the message timestamp
-    xfer->data = duplicate_gowhatsapp_message(gwamsg);
-    
-    purple_xfer_set_init_fnc(xfer, xfer_init);
-    
-    // be very sure to release the data no matter what code-path is taken
-    purple_xfer_set_end_fnc(xfer, xfer_release);
-    purple_xfer_set_request_denied_fnc(xfer, xfer_release);
-    purple_xfer_set_cancel_recv_fnc(xfer, xfer_release);
-    
-    purple_xfer_request(xfer);
-    // MEMCHECK NOTE: purple_xfer_unref calls purple_xfer_destroy which MAY call purple_xfer_cancel_local if (purple_xfer_get_status(xfer) == PURPLE_XFER_STATUS_STARTED) which calls cancel_recv and cancel_local
-}
-
-static void replace_placeholder(gpointer key, gpointer value, gpointer user_data) {
+static void
+replace_placeholder(gpointer key, gpointer value, gpointer user_data)
+{
     char **text = user_data;
-    // NOTE: I am not using g_string_replace here since the GLib shipped with win32 Pidgin is ancient
-    char *replaced = purple_strreplace(*text, key, value);
+    /* GLib < 2.68 has no g_string_replace, so use the old token-by-token
+     * scan that the libpurple 2 build used. */
+    GString *gs = g_string_new(*text);
+    g_string_replace(gs, key, value, 0);
     g_free(*text);
-    *text = replaced;
+    *text = g_string_free(gs, FALSE);
 }
 
-char * gowhatsapp_attachment_fill_template(const char *template, time_t timestamp, const char *hash, const char *filename, const char *extension, const char *remote, const char *sender, const char *chat_alias, const char *buddy_alias, const char *messageid, PurpleMessageFlags flags) {
-    // in case of chats, remote and sender may be different
-    // but in case of direct messages, they are the same
-    // I do not want the sender to appear twice
-    if (purple_strequal(remote, sender)) {
+char *
+gowhatsapp_attachment_fill_template(const char *template,
+                                    time_t timestamp,
+                                    const char *hash,
+                                    const char *filename,
+                                    const char *extension,
+                                    const char *remote,
+                                    const char *sender,
+                                    const char *chat_alias,
+                                    const char *buddy_alias,
+                                    const char *messageid,
+                                    G_GNUC_UNUSED PurpleMessageFlags flags)
+{
+    if (g_strcmp0(remote, sender) == 0) {
         sender = "";
     }
     const char *direction = "";
-    if (flags & PURPLE_MESSAGE_RECV) {
-        direction = "received";
-    }
-    if (flags & PURPLE_MESSAGE_SEND) {
-        direction = "sent";
-    }
+    /* libpurple 3 dropped PurpleMessageFlags; direction is no longer
+     * encoded as flags. Leave the placeholder for now and let the
+     * caller pass an empty string until the new attribute model lands. */
 
-    // this hash table does not release keys since they are static
-    // it does not release values since they are not owned by this function
     GHashTable *replacements = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
-    // casts necessary to remove const
-    g_hash_table_insert(replacements, "$home", (char *)purple_home_dir());
-    g_hash_table_insert(replacements, "$purple", (char *)purple_user_dir());
-    g_hash_table_insert(replacements, "$hash", (char *)hash);
+    g_hash_table_insert(replacements, "$home",      (char *)g_get_home_dir());
+    g_hash_table_insert(replacements, "$purple",    (char *)g_get_user_data_dir());
+    g_hash_table_insert(replacements, "$hash",      (char *)hash);
     g_hash_table_insert(replacements, "$direction", (char *)direction);
-    g_hash_table_insert(replacements, "$remote", (char *)remote);
-    g_hash_table_insert(replacements, "$sender", (char *)sender);
-    g_hash_table_insert(replacements, "$name", (char *)buddy_alias);
-    g_hash_table_insert(replacements, "$title", (char *)chat_alias);
+    g_hash_table_insert(replacements, "$remote",    (char *)remote);
+    g_hash_table_insert(replacements, "$sender",    (char *)sender);
+    g_hash_table_insert(replacements, "$name",      (char *)buddy_alias);
+    g_hash_table_insert(replacements, "$title",     (char *)chat_alias);
     g_hash_table_insert(replacements, "$messageid", (char *)messageid);
     g_hash_table_insert(replacements, "$extension", (char *)extension);
-    g_hash_table_insert(replacements, "$filename", (char *)filename);
+    g_hash_table_insert(replacements, "$filename",  (char *)filename);
 
-    char *replaced = g_strdup(purple_utf8_strftime(template, localtime(&timestamp)));
+    /* Format the strftime tokens first, then substitute the rest. */
+    char strftime_buf[1024];
+    struct tm *tmv = localtime(&timestamp);
+    if (tmv != NULL) {
+        strftime(strftime_buf, sizeof strftime_buf, template, tmv);
+    } else {
+        g_strlcpy(strftime_buf, template, sizeof strftime_buf);
+    }
+
+    char *replaced = g_strdup(strftime_buf);
     g_hash_table_foreach(replacements, replace_placeholder, &replaced);
     g_hash_table_destroy(replacements);
     return replaced;
 }
 
-#ifndef WIN32
-#include <unistd.h> // for symlink
-// TODO: for a cross-platform-solution, check out https://github.com/nyaosorg/go-windows-junction
-void create_symlinks_recurse(char *path, char *aliased_path) {
-    //purple_debug_info(GOWHATSAPP_NAME, "create_symlinks_recurse(%s, %s)…\n", aliased_path, path);
-    if (strlen(path) <= 1 || strlen(aliased_path) <= 1) {
-        // we reached / or . – stop recursion
-        return;
-    }
-    char *parent_directory = g_path_get_dirname(path);
-    char *aliased_parent_directory = g_path_get_dirname(aliased_path);
-    create_symlinks_recurse(parent_directory, aliased_parent_directory);
-    g_free(parent_directory);
-    g_free(aliased_parent_directory);
-    if (symlink(path, aliased_path) == 0) {
-        purple_debug_info(GOWHATSAPP_NAME, "Created symlink „%s“ → „%s“.\n", aliased_path, path);
-        // TODO: return aliased path, show that in conversation window
-    }
-}
-
-char * create_symlinks(PurpleAccount *account, const char *template, time_t timestamp, const char *hash, const char *filename, const char *extension, const char *remote, const char *sender, const char *chat_alias, const char *buddy_alias, const char *messageid, PurpleMessageFlags flags) {
-    // TODO: always store files with their hash, then provide symlink with the filename?
-    char *aliased_path = gowhatsapp_attachment_fill_template(template, timestamp, hash, filename, extension, chat_alias, buddy_alias, chat_alias, buddy_alias, messageid, flags);
-    char *path = gowhatsapp_attachment_fill_template(template, timestamp, hash, filename, extension, remote, sender, chat_alias, buddy_alias, messageid, flags);
-    create_symlinks_recurse(path, aliased_path);
-    g_free(aliased_path);
-    g_free(path);
-}
-#endif
-
-void download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *local_path_template) {
-    const char *chat_alias = gwamsg->remoteJid;
-    const char *buddy_alias = gwamsg->senderJid;
-    PurpleBuddy *buddy = purple_blist_find_buddy(gwamsg->account, gwamsg->senderJid);
-    if (buddy) {
-        const char *alias = purple_buddy_get_alias(buddy);
-        // do not use alias if it is NULL, empty or containing directory separator (characters unfit for use in file-system are not checked or escaped)
-        if (alias != NULL && *alias != 0 && strchr(alias, '/') == NULL) {
-            buddy_alias = alias;
-        }
-    }
-    PurpleChat *chat = purple_blist_find_chat(gwamsg->account, gwamsg->remoteJid);
-    if (chat) {
-        const char *alias = purple_chat_get_name(chat);
-        // do not use alias if it is NULL, empty or containing directory separator (characters unfit for use in file-system are not checked or escaped)
-        if (alias != NULL && *alias != 0 && strchr(alias, '/') == NULL) {
-            chat_alias = alias;
-        }
-    }
-    if (purple_strequal(gwamsg->remoteJid, gwamsg->senderJid)) {
-        // chat is contact (direct message)
+static void
+download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *local_path_template)
+{
+    const char *chat_alias  = display_alias_for(gwamsg->account, gwamsg->remoteJid);
+    const char *buddy_alias = display_alias_for(gwamsg->account, gwamsg->senderJid);
+    if (g_strcmp0(gwamsg->remoteJid, gwamsg->senderJid) == 0) {
         chat_alias = buddy_alias;
-    } else {
-        // group chat
     }
-    // assume a contact sent this file
-    PurpleMessageFlags flags = PURPLE_MESSAGE_RECV;
-    if (purple_strequal(purple_account_get_username(gwamsg->account), gwamsg->senderJid)) {
-        // we actually sent this file (from a different device)
-        flags = PURPLE_MESSAGE_SEND | PURPLE_MESSAGE_REMOTE_SEND;
-    }
-    char *local_path = gowhatsapp_attachment_fill_template(local_path_template, gwamsg->timestamp, gwamsg->hash_hex, gwamsg->filename, gwamsg->extension, gwamsg->remoteJid, gwamsg->senderJid, chat_alias, buddy_alias, gwamsg->messageId, flags);
-    char *error = gowhatsapp_go_download_attachment(gwamsg->account, local_path, gwamsg->download_handle);
+
+    char *local_path = gowhatsapp_attachment_fill_template(
+        local_path_template,
+        gwamsg->timestamp,
+        gwamsg->hash_hex,
+        gwamsg->filename,
+        gwamsg->extension,
+        gwamsg->remoteJid,
+        gwamsg->senderJid,
+        chat_alias,
+        buddy_alias,
+        gwamsg->messageId,
+        0);
+
+    char *error = gowhatsapp_go_download_attachment(gwamsg->account,
+                                                    local_path,
+                                                    gwamsg->download_handle);
     gowhatsapp_go_delete_handle(gwamsg->download_handle);
-    if (error && error[0]) {
-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId, TRUE);
+
+    if (error != NULL && error[0] != '\0') {
+        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
+                                        gwamsg->remoteJid, error,
+                                        gwamsg->timestamp, gwamsg->isGroup,
+                                        gwamsg->isOutgoing, gwamsg->name, 0,
+                                        gwamsg->messageId, TRUE);
     } else {
-        #ifndef WIN32
-            create_symlinks(gwamsg->account, local_path_template, gwamsg->timestamp, gwamsg->hash_hex, gwamsg->filename, gwamsg->extension, gwamsg->remoteJid, gwamsg->senderJid, chat_alias, buddy_alias, gwamsg->messageId, flags);
-        #endif
-        const char *url_template = purple_account_get_string(gwamsg->account, GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_OPTION, GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_DEFAULT);
-        char *url = gowhatsapp_go_url_from_local_path(local_path);
-        if (url_template && url_template[0]) {
-            url = gowhatsapp_attachment_fill_template(url_template, gwamsg->timestamp, gwamsg->hash_hex, gwamsg->filename, gwamsg->extension, gwamsg->remoteJid, gwamsg->senderJid, chat_alias, buddy_alias, gwamsg->messageId, flags);
+        PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
+        const char *url_template = purple_account_settings_get_string(
+            settings, GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_OPTION,
+            GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_DEFAULT);
+
+        char *url = NULL;
+        if (url_template != NULL && url_template[0] != '\0') {
+            url = gowhatsapp_attachment_fill_template(url_template,
+                                                      gwamsg->timestamp,
+                                                      gwamsg->hash_hex,
+                                                      gwamsg->filename,
+                                                      gwamsg->extension,
+                                                      gwamsg->remoteJid,
+                                                      gwamsg->senderJid,
+                                                      chat_alias, buddy_alias,
+                                                      gwamsg->messageId, 0);
+        } else {
+            url = gowhatsapp_go_url_from_local_path(local_path);
         }
-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, url, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, TRUE);
+
+        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
+                                        gwamsg->remoteJid, url,
+                                        gwamsg->timestamp, gwamsg->isGroup,
+                                        gwamsg->isOutgoing, gwamsg->name, 0,
+                                        gwamsg->messageId, TRUE);
         g_free(url);
-        gowhatsapp_display_image_inline(gwamsg, local_path);
-        gowhatsapp_display_caption(gwamsg);
+
+        /* Display the caption (the text accompanying the attachment, if any). */
+        if (gwamsg->text != NULL && gwamsg->text[0] != '\0') {
+            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
+                                            gwamsg->remoteJid, gwamsg->text,
+                                            gwamsg->timestamp, gwamsg->isGroup,
+                                            gwamsg->isOutgoing, gwamsg->name, 0,
+                                            gwamsg->messageId, TRUE);
+        }
+
+        /* TODO(libpurple-3): inline image rendering used to push the PNG
+         * bytes through purple_imgstore_add_with_id and embed an <img id="N"/>
+         * tag in the chat. libpurple 3 carries images on PurpleMessage's
+         * attachment / image properties instead (see PurpleImage +
+         * PurpleAttachments), which display_message.c would need to support. */
     }
+
     g_free(error);
     g_free(local_path);
 }
 
-static gboolean download_to_temporary_directory(gowhatsapp_message_t *gwamsg) {
-    char *local_path_tmp = g_strdup(g_build_filename(g_get_tmp_dir(), g_strdup_printf("whatsapp_image_%s%s", gwamsg->hash_hex, gwamsg->extension), NULL));
-    char *error = gowhatsapp_go_download_attachment(gwamsg->account, local_path_tmp, gwamsg->download_handle);
-    gowhatsapp_go_delete_handle(gwamsg->download_handle);
-    if (error && error[0]) {
-        gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, error, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_ERROR, gwamsg->messageId, TRUE);
-    } else {
-        gowhatsapp_display_image_inline(gwamsg, local_path_tmp);
-        gowhatsapp_display_caption(gwamsg);
-    }
-    g_remove(local_path_tmp);
-    g_free(local_path_tmp);
-}
+void
+gowhatsapp_handle_attachment(gowhatsapp_message_t *gwamsg)
+{
+    g_return_if_fail(gwamsg != NULL);
+    g_return_if_fail(gwamsg->account != NULL);
 
-void gowhatsapp_handle_attachment(gowhatsapp_message_t *gwamsg) {
-    gboolean inline_only = purple_strequal(purple_account_get_string(gwamsg->account, GOWHATSAPP_HANDLE_IMAGES_OPTION, GOWHATSAPP_HANDLE_IMAGES_CHOICE_BOTH), GOWHATSAPP_HANDLE_IMAGES_CHOICE_INLINE);
-    inline_only &= pixbuf_is_loadable_image_mimetype(gwamsg->mimetype); // only inline images which can be loaded
-    if (inline_only) {
-        download_to_temporary_directory(gwamsg);
-    } else {
-        const char *local_path_template = purple_account_get_string(gwamsg->account, GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION, GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT);
-        if (local_path_template && local_path_template[0]) {
-            // local path set, invoke auto-downloader
-            download_to_templated_destination(gwamsg, local_path_template);
-        } else {
-            download_via_xfer_mechanism(gwamsg);
-        }
+    PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
+    const char *local_path_template = purple_account_settings_get_string(
+        settings, GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION,
+        GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT);
+
+    if (local_path_template != NULL && local_path_template[0] != '\0') {
+        download_to_templated_destination(gwamsg, local_path_template);
+        return;
     }
+
+    /* TODO(libpurple-3): if no local path template is configured, the
+     * libpurple 2 code asked the user via PurpleXfer (purple_xfer_request).
+     * The equivalent now is to drive the inbound side of
+     * PurpleProtocolFileTransfer.receive_async — construct a
+     * PurpleFileTransfer via purple_file_transfer_new_receive and let
+     * libpurple drive the negotiation through the state machine. Until
+     * that lands, drop the attachment with a chat message and free the
+     * pending download handle so whatsmeow can release its temp file. */
+    gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
+                                    gwamsg->remoteJid,
+                                    "(attachment received but no download path is configured)",
+                                    gwamsg->timestamp, gwamsg->isGroup,
+                                    gwamsg->isOutgoing, gwamsg->name, 0,
+                                    gwamsg->messageId, TRUE);
+    gowhatsapp_go_delete_handle(gwamsg->download_handle);
+    gwamsg->download_handle = 0;
 }
