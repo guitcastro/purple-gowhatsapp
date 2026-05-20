@@ -1,6 +1,7 @@
 #include "purplegowhatsappprotocol.h"
 
 #include "gowhatsapp.h"
+#include "purplegowhatsappconnection.h"
 
 struct _PurpleGowhatsappProtocol {
     PurpleProtocol parent;
@@ -15,15 +16,13 @@ G_DEFINE_DYNAMIC_TYPE_EXTENDED(
 
 static PurpleConnection *
 purple_gowhatsapp_protocol_create_connection(G_GNUC_UNUSED PurpleProtocol *protocol,
-                                             G_GNUC_UNUSED PurpleAccount *account,
-                                             GError **error)
+                                             PurpleAccount *account,
+                                             G_GNUC_UNUSED GError **error)
 {
-    /* TODO: define a PurpleGowhatsappConnection GObject (G_DECLARE_FINAL_TYPE
-     * deriving from PurpleConnection) and return an instance here. The libpurple 3
-     * port of the connection logic in login.c / process_message.c will live there. */
-    g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                        "purple-gowhatsapp libpurple 3 port: connection class not yet implemented");
-    return NULL;
+    return g_object_new(
+        PURPLE_GOWHATSAPP_TYPE_CONNECTION,
+        "account", account,
+        NULL);
 }
 
 static void

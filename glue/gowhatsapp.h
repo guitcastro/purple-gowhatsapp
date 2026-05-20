@@ -1,3 +1,5 @@
+#pragma once
+
 #include "purple_compat.h"
 #include "bridge.h"
 

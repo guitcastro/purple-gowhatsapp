@@ -5,6 +5,8 @@ set(TARGET_NAME whatsmeow)
 add_library(${TARGET_NAME} SHARED
     "gowhatsapp.h"
     "init.c"
+    "purplegowhatsappconnection.c"
+    "purplegowhatsappconnection.h"
     "purplegowhatsappprotocol.c"
     "purplegowhatsappprotocol.h"
     "bridge.c"

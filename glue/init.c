@@ -24,6 +24,7 @@
 #include <purple.h>
 
 #include "gowhatsapp.h"
+#include "purplegowhatsappconnection.h"
 #include "purplegowhatsappprotocol.h"
 
 #ifndef PLUGIN_VERSION
@@ -70,6 +71,7 @@ purple_gowhatsapp_load(GPluginPlugin *plugin, GError **error)
         return FALSE;
     }
 
+    purple_gowhatsapp_connection_register(GPLUGIN_NATIVE_PLUGIN(plugin));
     purple_gowhatsapp_protocol_register(GPLUGIN_NATIVE_PLUGIN(plugin));
 
     gowhatsapp_protocol = purple_gowhatsapp_protocol_new();
@@ -123,6 +125,14 @@ void gowhatsapp_process_message(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
     /* TODO(libpurple-3): port glue/process_message.c. */
     g_log(GOWHATSAPP_NAME, G_LOG_LEVEL_WARNING,
           "gowhatsapp_process_message stub: dropping message of type %d", gwamsg->msgtype);
+}
+
+const char *
+gowhatsapp_blist_get_alias(G_GNUC_UNUSED PurpleAccount *account,
+                           G_GNUC_UNUSED const char *who)
+{
+    /* TODO(libpurple-3): port glue/blist.c. */
+    return NULL;
 }
 
 GPLUGIN_NATIVE_PLUGIN_DECLARE(purple_gowhatsapp)
