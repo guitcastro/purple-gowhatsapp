@@ -1,25 +1,31 @@
 set(TARGET_NAME whatsmeow)
-add_library(${TARGET_NAME} SHARED 
+# libpurple 3 port in progress: only the files that have been ported are
+# compiled. The rest of glue/ still targets libpurple 2 APIs and must be
+# rewritten before being added back to this list.
+add_library(${TARGET_NAME} SHARED
     "gowhatsapp.h"
     "init.c"
-    "login.c"
-    "qrcode.c"
+    "purplegowhatsappprotocol.c"
+    "purplegowhatsappprotocol.h"
     "bridge.c"
     "../bridge.c" # this needs to be compiled again since go's c-archive mode does not include the C object
     "../bridge.h"
-    "process_message.c"
-    "display_message.c"
-    "groups.c"
-    "blist.c"
-    "send_message.c"
-    "handle_attachment.c"
-    "send_file.c"
-    "presence.c"
-    "options.c"
-    "receipt.c"
     "pixbuf.c"
     "pixbuf.h"
-    "commands.c"
+    # TODO(libpurple-3): port the files below.
+    # "login.c"
+    # "qrcode.c"
+    # "process_message.c"
+    # "display_message.c"
+    # "groups.c"
+    # "blist.c"
+    # "send_message.c"
+    # "handle_attachment.c"
+    # "send_file.c"
+    # "presence.c"
+    # "options.c"
+    # "receipt.c"
+    # "commands.c"
 )
 add_dependencies(${TARGET_NAME} libwhatsmeow)
 

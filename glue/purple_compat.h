@@ -23,6 +23,9 @@ typedef struct _PurpleNotifyUserInfo  PurpleNotifyUserInfo;
  * PurpleMessage getters/setters instead. Treat the flags as an opaque int
  * during the port so existing prototypes still parse. */
 typedef guint PurpleMessageFlags;
+/* PurpleStatus was removed; libpurple 3 uses PurplePresence and PurpleSavedPresence.
+ * Opaque placeholder while presence.c still references the old type. */
+typedef struct _PurpleStatus PurpleStatus;
 #endif
 
 #define PURPLE_XFER_TYPE_SEND PURPLE_XFER_SEND

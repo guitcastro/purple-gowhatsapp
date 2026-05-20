@@ -23,17 +23,17 @@
 static void process_message(gowhatsapp_message_t * gwamsg) {
     if (gwamsg->msgtype == gowhatsapp_message_type_log) {
         // log messages do not need an active connection
-        purple_debug(gwamsg->subtype, GOWHATSAPP_NAME, "%s", gwamsg->text);
+        g_log(GOWHATSAPP_NAME, G_LOG_LEVEL_DEBUG, "%s", gwamsg->text);
         return;
     }
     int account_exists = gowhatsapp_account_exists(gwamsg->account);
     if (account_exists == 0) {
-        purple_debug_warning(GOWHATSAPP_NAME, "No account %p. Ignoring message.\n", gwamsg->account);
+        g_log(GOWHATSAPP_NAME, G_LOG_LEVEL_WARNING, "No account %p. Ignoring message.", gwamsg->account);
         return;
     }
     PurpleConnection *connection = purple_account_get_connection(gwamsg->account);
     if (connection == NULL) {
-        purple_debug_warning(GOWHATSAPP_NAME, "No active connection for account %p. Ignoring message.\n", gwamsg->account);
+        g_log(GOWHATSAPP_NAME, G_LOG_LEVEL_WARNING, "No active connection for account %p. Ignoring message.", gwamsg->account);
         return;
     }
     gowhatsapp_process_message(gwamsg);
