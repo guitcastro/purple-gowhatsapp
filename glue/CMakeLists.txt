@@ -1,7 +1,10 @@
 set(TARGET_NAME whatsmeow)
-# libpurple 3 port in progress: only the files that have been ported are
-# compiled. The rest of glue/ still targets libpurple 2 APIs and must be
-# rewritten before being added back to this list.
+# All glue/ translation units now compile against libpurple 3. Individual
+# files still carry TODO markers for features that depend on libpurple 3
+# subsystems we have not finished wiring up yet (outbound presence on
+# PurpleConnectionClass::set_presence, PurpleProtocolFileTransfer.receive_async,
+# inline image rendering via PurpleAttachments / PurpleImage, the
+# "conversation-updated" read-receipt heuristic, etc).
 add_library(${TARGET_NAME} SHARED
     "gowhatsapp.h"
     "init.c"
