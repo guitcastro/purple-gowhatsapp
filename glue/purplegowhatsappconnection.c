@@ -1,8 +1,7 @@
 #include "purplegowhatsappconnection.h"
 
+#include "constants.h"
 #include "libwhatsmeow.h"
-
-#define GOWHATSAPP_CREDENTIALS_KEY "credentials"
 
 struct _PurpleGowhatsappConnection {
     PurpleConnection parent;

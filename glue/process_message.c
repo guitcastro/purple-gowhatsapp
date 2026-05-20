@@ -1,17 +1,27 @@
 #include "gowhatsapp.h"
 #include "constants.h"
-#include "libwhatsmeow.h" // for gowhatsapp_go_query_contacts
+#include "libwhatsmeow.h" // for gowhatsapp_go_get_contacts
+#include "purplegowhatsappconnection.h"
+
+#define PURPLE_GOWHATSAPP_DOMAIN (g_quark_from_static_string("purple-gowhatsapp"))
 
 static const char *gowhatsapp_message_type_string[] = {
     FOREACH_MESSAGE_TYPE(GENERATE_STRING)
 };
 
-static gboolean gowhatsapp_message_is_old(gowhatsapp_message_t *gwamsg) {
-    WhatsappProtocolData *wpd = (WhatsappProtocolData *)purple_connection_get_protocol_data(purple_account_get_connection(gwamsg->account));
-    if (wpd->connected_at_timestamp > gwamsg->timestamp) {
-        const gboolean discard_old_messages = purple_account_get_bool(gwamsg->account, GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION, FALSE);
-        if (discard_old_messages) {
-            purple_debug_info(GOWHATSAPP_NAME, "This message is older than the connection.\n");
+static gboolean
+gowhatsapp_message_is_old(gowhatsapp_message_t *gwamsg)
+{
+    PurpleConnection *pc = purple_account_get_connection(gwamsg->account);
+    WhatsappProtocolData *wpd = purple_gowhatsapp_connection_get_protocol_data(pc);
+
+    if (wpd != NULL && wpd->connected_at_timestamp > gwamsg->timestamp) {
+        PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
+        gboolean discard = purple_account_settings_get_boolean(settings,
+                                                               GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION,
+                                                               FALSE);
+        if (discard) {
+            g_info("%s: dropping message older than connection timestamp.", GOWHATSAPP_NAME);
             return TRUE;
         }
     }
@@ -19,22 +29,23 @@ static gboolean gowhatsapp_message_is_old(gowhatsapp_message_t *gwamsg) {
 }
 
 /*
- * Tells the front-end we are now online.
+ * Tells the front-end the account is now ready (connected).
  *
- * Also tells the front-end to display all our buddies as no longer offline so they can be interacted with.
- * 
- * Additionally requests the profile picture of each buddy.
+ * In libpurple 2 this also walked the buddy list to mark everyone as
+ * away, refresh profile pictures, and so on. Those side effects depend
+ * on glue/blist.c and glue/presence.c which still need to be ported.
  */
-static void gowhatsapp_connection_set_online(PurpleConnection *connection) {
+static void
+gowhatsapp_connection_set_online(PurpleConnection *connection)
+{
     PurpleAccount *account = purple_connection_get_account(connection);
-    purple_connection_set_state(connection, PURPLE_CONNECTION_CONNECTED);
+    purple_account_ready(account);
 
-    // display all buddies as "away"
-    gowhatsapp_for_all_buddies(account, gowhatsapp_assume_buddy_away);
-    // set own presence (and subscribe for presence updates so buddies may displayed as "online")
-    gowhatsapp_set_presence(account, purple_account_get_active_status(account));
-
-    gowhatsapp_for_all_buddies(account, gowhatsapp_request_profile_picture);
+    /* TODO(libpurple-3): once glue/blist.c and glue/presence.c land, also:
+     *   - mark all buddies as away (gowhatsapp_for_all_buddies + assume_buddy_away)
+     *   - publish our own presence (gowhatsapp_set_presence)
+     *   - request profile pictures (gowhatsapp_for_all_buddies + request_profile_picture)
+     */
 }
 
 /*
@@ -44,11 +55,13 @@ void
 gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
 {
     if (gwamsg->msgtype < 0 || gwamsg->msgtype >= gowhatsapp_message_type_max) {
-        purple_debug_info(GOWHATSAPP_NAME, "recieved invalid message type %d.\n", gwamsg->msgtype);
+        g_warning("%s: received invalid message type %d", GOWHATSAPP_NAME, gwamsg->msgtype);
         return;
     }
-    purple_debug_info(
-        GOWHATSAPP_NAME, "recieved %s (subtype %d) for account %p remote %s (isGroup %d) sender %s (alias %s, isOutgoing %d) sent %ld: %s\n",
+
+    g_info(
+        "%s: received %s (subtype %d) account=%p remote=%s isGroup=%d sender=%s alias=%s isOutgoing=%d ts=%ld text=%s",
+        GOWHATSAPP_NAME,
         gowhatsapp_message_type_string[gwamsg->msgtype],
         gwamsg->subtype,
         gwamsg->account,
@@ -58,21 +71,23 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
         gwamsg->name,
         gwamsg->isOutgoing,
         gwamsg->timestamp,
-        gwamsg->text
-    );
+        gwamsg->text);
 
     PurpleConnection *pc = purple_account_get_connection(gwamsg->account);
+    PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
 
     if (!gwamsg->timestamp) {
         gwamsg->timestamp = time(NULL);
     }
-    switch(gwamsg->msgtype) {
+
+    switch (gwamsg->msgtype) {
         case gowhatsapp_message_type_error:
-            if (gwamsg->subtype == 0) {
-                purple_connection_error(pc, PURPLE_CONNECTION_ERROR_NETWORK_ERROR, gwamsg->text);
-            } else {
-                purple_connection_error(pc, PURPLE_CONNECTION_ERROR_OTHER_ERROR, gwamsg->text);
-            }
+            purple_account_disconnect_with_new_error(gwamsg->account,
+                                                    gwamsg->text,
+                                                    PURPLE_GOWHATSAPP_DOMAIN,
+                                                    gwamsg->subtype,
+                                                    "%s",
+                                                    gwamsg->text);
             gowhatsapp_close_qrcode(gwamsg->account);
             break;
         case gowhatsapp_message_type_login:
@@ -86,46 +101,48 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
             break;
         case gowhatsapp_message_type_connected:
             gowhatsapp_close_qrcode(gwamsg->account);
-            if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION, TRUE)) {
-                // after connecting, fetch contacts.
-                // results will come in asyncronously, see next case
+            if (purple_account_settings_get_boolean(settings,
+                                                    GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION,
+                                                    TRUE)) {
                 gowhatsapp_go_get_contacts(gwamsg->account, FALSE);
             } else {
-                // do not query contacts, just signal we are online now, but note next case
                 gowhatsapp_connection_set_online(pc);
             }
             break;
         case gowhatsapp_message_type_name:
-            if (NULL == gwamsg->remoteJid) {
-                // The end of the list of contacts was reached.
-                // The connection can now be regarded as "connected".
-                // This does not happen immediately since Spectrum will automatically call roomlist_get_list
-                // as soon as the connection ha been established. However, it needs all contacts to be updated
-                // before entering any group chat. Or the group chat participants' names will not be resolved.
+            if (gwamsg->remoteJid == NULL) {
                 gowhatsapp_connection_set_online(pc);
-                // we also want to query the room list automatically (so group chats may be added to the buddy list).
                 gowhatsapp_roomlist_get_list(pc);
             } else {
                 gowhatsapp_ensure_buddy_in_blist(gwamsg->account, gwamsg->remoteJid, gwamsg->name);
             }
             break;
         case gowhatsapp_message_type_disconnected:
-            purple_connection_set_state(pc, PURPLE_CONNECTION_DISCONNECTED);
+            purple_account_disconnect(gwamsg->account, gwamsg->text);
             gowhatsapp_close_qrcode(gwamsg->account);
             break;
         case gowhatsapp_message_type_text:
             if (!gowhatsapp_message_is_old(gwamsg)) {
-                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, 0, gwamsg->messageId, TRUE);
+                gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid,
+                                                gwamsg->text, gwamsg->timestamp, gwamsg->isGroup,
+                                                gwamsg->isOutgoing, gwamsg->name, 0,
+                                                gwamsg->messageId, TRUE);
             }
             break;
         case gowhatsapp_message_type_system:
-            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid, gwamsg->text, gwamsg->timestamp, gwamsg->isGroup, gwamsg->isOutgoing, gwamsg->name, PURPLE_MESSAGE_SYSTEM, gwamsg->messageId, TRUE);
+            /* TODO(libpurple-3): PurpleMessageFlags is gone; system-message marking
+             * needs to be expressed via the new PurpleMessage attribute API once
+             * display_message.c is ported. */
+            gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid,
+                                            gwamsg->text, gwamsg->timestamp, gwamsg->isGroup,
+                                            gwamsg->isOutgoing, gwamsg->name, 0,
+                                            gwamsg->messageId, TRUE);
             break;
         case gowhatsapp_message_type_typing:
-            serv_got_typing(pc, gwamsg->remoteJid, 0, PURPLE_TYPING);
-            break;
         case gowhatsapp_message_type_typing_stopped:
-            serv_got_typing_stopped(pc, gwamsg->remoteJid);
+            /* TODO(libpurple-3): serv_got_typing[_stopped] is gone. Typing state
+             * now lives on PurpleConversation; look the conversation up via
+             * PurpleConversationManager (handled when conversation/IM glue lands). */
             break;
         case gowhatsapp_message_type_presence:
             gowhatsapp_handle_presence(gwamsg->account, gwamsg->remoteJid, gwamsg->subtype, gwamsg->timestamp);
@@ -142,7 +159,7 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
             gowhatsapp_handle_group(pc, gwamsg);
             break;
         default:
-            purple_debug_info(GOWHATSAPP_NAME, "Handling this message type is not implemented.\n");
+            g_info("%s: handling for this message type is not implemented.", GOWHATSAPP_NAME);
             g_free(gwamsg->blob);
     }
 }

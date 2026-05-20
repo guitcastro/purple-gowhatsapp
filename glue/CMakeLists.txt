@@ -14,10 +14,10 @@ add_library(${TARGET_NAME} SHARED
     "../bridge.h"
     "pixbuf.c"
     "pixbuf.h"
+    "process_message.c"
     # TODO(libpurple-3): port the files below.
     # "login.c"
     # "qrcode.c"
-    # "process_message.c"
     # "display_message.c"
     # "groups.c"
     # "blist.c"

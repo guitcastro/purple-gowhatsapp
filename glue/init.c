@@ -24,6 +24,7 @@
 #include <purple.h>
 
 #include "gowhatsapp.h"
+#include "constants.h"
 #include "purplegowhatsappconnection.h"
 #include "purplegowhatsappprotocol.h"
 
@@ -120,19 +121,92 @@ purple_gowhatsapp_unload(G_GNUC_UNUSED GPluginPlugin *plugin,
  * to libpurple 3. Each TODO marker below should be removed once the
  * corresponding .c file is rewritten and re-added to glue/CMakeLists.txt.
  */
-void gowhatsapp_process_message(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
-{
-    /* TODO(libpurple-3): port glue/process_message.c. */
-    g_log(GOWHATSAPP_NAME, G_LOG_LEVEL_WARNING,
-          "gowhatsapp_process_message stub: dropping message of type %d", gwamsg->msgtype);
-}
-
 const char *
 gowhatsapp_blist_get_alias(G_GNUC_UNUSED PurpleAccount *account,
                            G_GNUC_UNUSED const char *who)
 {
     /* TODO(libpurple-3): port glue/blist.c. */
     return NULL;
+}
+
+/* TODO(libpurple-3): port glue/qrcode.c. */
+void
+gowhatsapp_handle_qrcode(G_GNUC_UNUSED PurpleConnection *pc,
+                         G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
+{
+}
+
+void
+gowhatsapp_close_qrcode(G_GNUC_UNUSED PurpleAccount *account)
+{
+}
+
+/* TODO(libpurple-3): port glue/login.c::gowhatsapp_store_credentials over to
+ * the PurpleAccountSettings / PurpleCredentialManager APIs. */
+void
+gowhatsapp_store_credentials(PurpleAccount *account, char *credentials)
+{
+    PurpleAccountSettings *settings = purple_account_get_settings(account);
+    purple_account_settings_set_string(settings, GOWHATSAPP_CREDENTIALS_KEY, credentials);
+}
+
+/* TODO(libpurple-3): port glue/groups.c. */
+PurpleRoomlist *
+gowhatsapp_roomlist_get_list(G_GNUC_UNUSED PurpleConnection *pc)
+{
+    return NULL;
+}
+
+void
+gowhatsapp_handle_group(G_GNUC_UNUSED PurpleConnection *pc,
+                        G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
+{
+}
+
+/* TODO(libpurple-3): port glue/blist.c. */
+PurpleBuddy *
+gowhatsapp_ensure_buddy_in_blist(G_GNUC_UNUSED PurpleAccount *account,
+                                 G_GNUC_UNUSED const char *remoteJid,
+                                 G_GNUC_UNUSED const char *display_name)
+{
+    return NULL;
+}
+
+/* TODO(libpurple-3): port glue/display_message.c. */
+void
+gowhatsapp_display_text_message(G_GNUC_UNUSED PurpleAccount *account,
+                                G_GNUC_UNUSED const gchar *senderJid,
+                                G_GNUC_UNUSED const gchar *remoteJid,
+                                G_GNUC_UNUSED const gchar *text,
+                                G_GNUC_UNUSED const time_t timestamp,
+                                G_GNUC_UNUSED const gboolean isGroup,
+                                G_GNUC_UNUSED const gboolean isOutgoing,
+                                G_GNUC_UNUSED const gchar *name,
+                                G_GNUC_UNUSED PurpleMessageFlags flags,
+                                G_GNUC_UNUSED const gchar *messageId,
+                                G_GNUC_UNUSED const gboolean escape)
+{
+}
+
+/* TODO(libpurple-3): port glue/presence.c. */
+void
+gowhatsapp_handle_presence(G_GNUC_UNUSED PurpleAccount *account,
+                           G_GNUC_UNUSED char *remoteJid,
+                           G_GNUC_UNUSED char available,
+                           G_GNUC_UNUSED time_t last_seen)
+{
+}
+
+/* TODO(libpurple-3): port glue/handle_attachment.c. */
+void
+gowhatsapp_handle_attachment(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
+{
+}
+
+/* TODO(libpurple-3): port glue/blist.c (profile picture handling). */
+void
+gowhatsapp_handle_profile_picture(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
+{
 }
 
 GPLUGIN_NATIVE_PLUGIN_DECLARE(purple_gowhatsapp)
