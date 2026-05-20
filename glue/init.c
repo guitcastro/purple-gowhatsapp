@@ -121,18 +121,6 @@ purple_gowhatsapp_unload(G_GNUC_UNUSED GPluginPlugin *plugin,
  * to libpurple 3. Each TODO marker below should be removed once the
  * corresponding .c file is rewritten and re-added to glue/CMakeLists.txt.
  */
-/* TODO(libpurple-3): port glue/qrcode.c. */
-void
-gowhatsapp_handle_qrcode(G_GNUC_UNUSED PurpleConnection *pc,
-                         G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
-{
-}
-
-void
-gowhatsapp_close_qrcode(G_GNUC_UNUSED PurpleAccount *account)
-{
-}
-
 /* TODO(libpurple-3): port glue/login.c::gowhatsapp_store_credentials over to
  * the PurpleAccountSettings / PurpleCredentialManager APIs. */
 void
