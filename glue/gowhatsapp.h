@@ -20,7 +20,7 @@ typedef struct {
 } WhatsappProtocolData;
 
 // options
-GList *gowhatsapp_add_account_options(GList *account_options);
+PurpleAccountSettings *gowhatsapp_get_default_account_settings(void);
 
 // login
 void gowhatsapp_login(PurpleAccount *account);

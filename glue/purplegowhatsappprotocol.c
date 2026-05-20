@@ -25,6 +25,12 @@ purple_gowhatsapp_protocol_create_connection(G_GNUC_UNUSED PurpleProtocol *proto
         NULL);
 }
 
+static PurpleAccountSettings *
+purple_gowhatsapp_protocol_get_default_account_settings(G_GNUC_UNUSED PurpleProtocol *protocol)
+{
+    return gowhatsapp_get_default_account_settings();
+}
+
 static void
 purple_gowhatsapp_protocol_init(G_GNUC_UNUSED PurpleGowhatsappProtocol *protocol)
 {
@@ -41,6 +47,8 @@ purple_gowhatsapp_protocol_class_init(PurpleGowhatsappProtocolClass *klass)
     PurpleProtocolClass *protocol_class = PURPLE_PROTOCOL_CLASS(klass);
 
     protocol_class->create_connection = purple_gowhatsapp_protocol_create_connection;
+    protocol_class->get_default_account_settings =
+        purple_gowhatsapp_protocol_get_default_account_settings;
 }
 
 void

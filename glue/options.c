@@ -1,209 +1,124 @@
 #include "gowhatsapp.h"
 #include "constants.h"
 
-// from https://github.com/ars3niy/tdlib-purple/blob/master/tdlib-purple.cpp
-static GList * add_choice(GList *choices, const char *description, const char *value)
+static PurpleAccountSetting *
+add_string(PurpleAccountSettings *settings, const char *id, const char *label, const char *default_value)
 {
-    PurpleKeyValuePair *kvp = g_new0(PurpleKeyValuePair, 1); // MEMCHECK: caller takes ownership
-    kvp->key = g_strdup(description); // MEMCHECK: according to valgrind, this leaks
-    kvp->value = g_strdup(value); // MEMCHECK: according to valgrind, this leaks
-    return g_list_append(choices, kvp);
+    PurpleAccountSetting *setting = purple_account_setting_string_new(id, label, default_value);
+    purple_account_settings_add_setting(settings, setting);
+    return setting;
 }
 
-GList *
-gowhatsapp_add_account_options(GList *account_options)
+static PurpleAccountSetting *
+add_int(PurpleAccountSettings *settings, const char *id, const char *label, int default_value)
 {
-    PurpleAccountOption *option; // MEMCHECK: caller takes ownership
-    
-    option = purple_account_option_string_new( // MEMCHECK: account_options takes ownership
-        "Database address",
-        GOWHATSAPP_DATABASE_ADDRESS_OPTION,
-        GOWHATSAPP_DATABASE_ADDRESS_DEFAULT
-        );
-    account_options = g_list_append(account_options, option);
-    
-    char * device_name = g_strdup_printf(GOWHATSAPP_DEVICE_NAME_DEFAULT,  g_get_host_name());
-    option = purple_account_option_string_new( // MEMCHECK: account_options takes ownership
-        "Device name",
-        GOWHATSAPP_DEVICE_NAME_OPTION,
-        device_name
-        );
-    account_options = g_list_append(account_options, option);
-    g_free(device_name);
-    
-    {
-        GList *choices = NULL;
-        choices = add_choice(choices, "Immediately", GOWHATSAPP_SEND_RECEIPT_CHOICE_IMMEDIATELY);
-        choices = add_choice(choices, "When interacting with conversation", GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_INTERACT);
-        choices = add_choice(choices, "When sending a reply", GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_ANSWER);
-        choices = add_choice(choices, "Never", GOWHATSAPP_SEND_RECEIPT_CHOICE_NEVER);
-        option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
-            "Send receipts",
-            GOWHATSAPP_SEND_RECEIPT_OPTION,
-            choices
-        );
-        account_options = g_list_append(account_options, option);
-    }
-    
-    {
-        GList *choices = NULL;
-        choices = add_choice(choices, "Internal", GOWHATSAPP_ECHO_CHOICE_INTERNAL);
-        choices = add_choice(choices, "On success", GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS);
-        choices = add_choice(choices, "Immediately", GOWHATSAPP_ECHO_CHOICE_IMMEDIATELY);
-        choices = add_choice(choices, "Never", GOWHATSAPP_ECHO_CHOICE_NEVER);
-        option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
-            "Echo sent messages",
-            GOWHATSAPP_ECHO_OPTION,
-            choices
-        );
-        account_options = g_list_append(account_options, option);
-    }
-    
-    option = purple_account_option_int_new(
-                "Message duration in days (0 to disable expiration)",
-                GOWHATSAPP_EXPIRATION_OPTION,
-                0
-                );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_int_new(
-                "Number of messages to cache",
-                GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION,
-                0
-                );
-    account_options = g_list_append(account_options, option);
+    PurpleAccountSetting *setting = purple_account_setting_int_new(id, label, default_value);
+    purple_account_settings_add_setting(settings, setting);
+    return setting;
+}
 
-    option = purple_account_option_int_new( // MEMCHECK: account_options takes ownership
-        "QR code size (pixels)",
-        GOWHATSAPP_QRCODE_SIZE_OPTION,
-        256
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_string_new( // MEMCHECK: account_options takes ownership
-        "Attachment file path template",
-        GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION,
-        GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_string_new( // MEMCHECK: account_options takes ownership
-        "Attachment base url",
-        GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_OPTION,
-        GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_DEFAULT
-        );
-    account_options = g_list_append(account_options, option);
+static PurpleAccountSetting *
+add_bool(PurpleAccountSettings *settings, const char *id, const char *label, gboolean default_value)
+{
+    PurpleAccountSetting *setting = purple_account_setting_boolean_new(id, label, default_value);
+    purple_account_settings_add_setting(settings, setting);
+    return setting;
+}
 
-    option = purple_account_option_int_new(
-        "Maximum linked file-size (MB)",
-        GOWHATSAPP_EMBED_MAX_FILE_SIZE_OPTION,
-        0
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_string_new( // MEMCHECK: account_options takes ownership
-        "Linked file trusted URL regex",
-        GOWHATSAPP_TRUSTED_URL_REGEX_OPTION,
-        GOWHATSAPP_TRUSTED_URL_REGEX_DEFAULT
-        );
-    account_options = g_list_append(account_options, option);
-        
-    {
-        GList *choices = NULL;
-        choices = add_choice(choices, "no", GOWHATSAPP_ICONS_CHOICE_NO);
-        choices = add_choice(choices, "preview", GOWHATSAPP_ICONS_CHOICE_PREVIEW);
-        choices = add_choice(choices, "original", GOWHATSAPP_ICONS_CHOICE_ORIGINAL);
-        option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
-            "Download user profile pictures",
-            GOWHATSAPP_ICONS_OPTION,
-            choices
-        );
-        account_options = g_list_append(account_options, option);
-    }
+static void
+list_add(PurpleAccountSetting *setting, const char *id, const char *label)
+{
+    purple_account_setting_string_list_add_item(PURPLE_ACCOUNT_SETTING_STRING_LIST(setting), id, label);
+}
+
+PurpleAccountSettings *
+gowhatsapp_get_default_account_settings(void)
+{
+    PurpleAccountSettings *settings = purple_account_settings_new();
+    PurpleAccountSetting *setting = NULL;
+
+    add_string(settings, GOWHATSAPP_DATABASE_ADDRESS_OPTION,
+               "Database address",
+               GOWHATSAPP_DATABASE_ADDRESS_DEFAULT);
 
     {
-        GList *choices = NULL;
-        choices = add_choice(choices, "download to user-defined location and show", GOWHATSAPP_HANDLE_IMAGES_CHOICE_BOTH);
-        choices = add_choice(choices, "download to temporary location and show", GOWHATSAPP_HANDLE_IMAGES_CHOICE_INLINE);
-        choices = add_choice(choices, "download to user-defined location only", GOWHATSAPP_HANDLE_IMAGES_CHOICE_ATTACHMENT);
-        option = purple_account_option_list_new( // MEMCHECK: account_options takes ownership
-            "How to handle images",
-            GOWHATSAPP_HANDLE_IMAGES_OPTION,
-            choices
-        );
-        account_options = g_list_append(account_options, option);
+        char *device_name = g_strdup_printf(GOWHATSAPP_DEVICE_NAME_DEFAULT, g_get_host_name());
+        add_string(settings, GOWHATSAPP_DEVICE_NAME_OPTION, "Device name", device_name);
+        g_free(device_name);
     }
 
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Discard old messages",
-        GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION,
-        FALSE
-        );
-    account_options = g_list_append(account_options, option);
+    setting = purple_account_setting_string_list_new(GOWHATSAPP_SEND_RECEIPT_OPTION, "Send receipts");
+    list_add(setting, GOWHATSAPP_SEND_RECEIPT_CHOICE_IMMEDIATELY, "Immediately");
+    list_add(setting, GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_INTERACT, "When interacting with conversation");
+    list_add(setting, GOWHATSAPP_SEND_RECEIPT_CHOICE_ON_ANSWER, "When sending a reply");
+    list_add(setting, GOWHATSAPP_SEND_RECEIPT_CHOICE_NEVER, "Never");
+    purple_account_setting_string_list_set_active_item(
+        PURPLE_ACCOUNT_SETTING_STRING_LIST(setting),
+        GOWHATSAPP_SEND_RECEIPT_CHOICE_IMMEDIATELY);
+    purple_account_settings_add_setting(settings, setting);
 
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Treat group as the origin of files",
-        GOWHATSAPP_GROUP_IS_FILE_ORIGIN_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
+    setting = purple_account_setting_string_list_new(GOWHATSAPP_ECHO_OPTION, "Echo sent messages");
+    list_add(setting, GOWHATSAPP_ECHO_CHOICE_INTERNAL, "Internal");
+    list_add(setting, GOWHATSAPP_ECHO_CHOICE_ON_SUCCESS, "On success");
+    list_add(setting, GOWHATSAPP_ECHO_CHOICE_IMMEDIATELY, "Immediately");
+    list_add(setting, GOWHATSAPP_ECHO_CHOICE_NEVER, "Never");
+    purple_account_setting_string_list_set_active_item(
+        PURPLE_ACCOUNT_SETTING_STRING_LIST(setting),
+        GOWHATSAPP_ECHO_CHOICE_INTERNAL);
+    purple_account_settings_add_setting(settings, setting);
 
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Display offline contacts as away",
-        GOWHATSAPP_FAKE_ONLINE_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Fetch contacts from main device once after linking",
-        GOWHATSAPP_FETCH_CONTACTS_AFTER_LINKING_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Update contacts every time after login",
-        GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Update buddy name when receiving a message",
-        GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
+    add_int(settings, GOWHATSAPP_EXPIRATION_OPTION,
+            "Message duration in days (0 to disable expiration)", 0);
+    add_int(settings, GOWHATSAPP_MESSAGE_CACHE_SIZE_OPTION,
+            "Number of messages to cache", 0);
+    add_int(settings, GOWHATSAPP_QRCODE_SIZE_OPTION,
+            "QR code size (pixels)", 256);
 
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Automatically join all chats",
-        GOWHATSAPP_AUTO_JOIN_CHAT_OPTION,
-        FALSE
-        );
-    account_options = g_list_append(account_options, option);    
-    
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Ignore status broadcasts",
-        GOWHATSAPP_IGNORE_STATUS_BROADCAST_OPTION,
-        TRUE
-        );
-    account_options = g_list_append(account_options, option);
-    
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Protocol bridge compatibility mode",
-        GOWHATSAPP_BRIDGE_COMPATIBILITY_OPTION,
-        FALSE
-        );
-    account_options = g_list_append(account_options, option);
-    
-    // for https://github.com/Juliaria08
-    option = purple_account_option_bool_new( // MEMCHECK: account_options takes ownership
-        "Display message ID",
-        GOWHATSAPP_DISPLAY_MESSAGE_ID_OPTION,
-        FALSE
-        );
-    account_options = g_list_append(account_options, option);
+    add_string(settings, GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_OPTION,
+               "Attachment file path template",
+               GOWHATSAPP_ATTACHMENT_PATH_TEMPLATE_DEFAULT);
 
-    return account_options;
+    add_string(settings, GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_OPTION,
+               "Attachment base url",
+               GOWHATSAPP_ATTACHMENT_URL_TEMPLATE_DEFAULT);
+
+    add_int(settings, GOWHATSAPP_EMBED_MAX_FILE_SIZE_OPTION,
+            "Maximum linked file-size (MB)", 0);
+
+    add_string(settings, GOWHATSAPP_TRUSTED_URL_REGEX_OPTION,
+               "Linked file trusted URL regex",
+               GOWHATSAPP_TRUSTED_URL_REGEX_DEFAULT);
+
+    setting = purple_account_setting_string_list_new(GOWHATSAPP_ICONS_OPTION,
+                                                     "Download user profile pictures");
+    list_add(setting, GOWHATSAPP_ICONS_CHOICE_NO, "no");
+    list_add(setting, GOWHATSAPP_ICONS_CHOICE_PREVIEW, "preview");
+    list_add(setting, GOWHATSAPP_ICONS_CHOICE_ORIGINAL, "original");
+    purple_account_setting_string_list_set_active_item(
+        PURPLE_ACCOUNT_SETTING_STRING_LIST(setting),
+        GOWHATSAPP_ICONS_CHOICE_NO);
+    purple_account_settings_add_setting(settings, setting);
+
+    setting = purple_account_setting_string_list_new(GOWHATSAPP_HANDLE_IMAGES_OPTION,
+                                                     "How to handle images");
+    list_add(setting, GOWHATSAPP_HANDLE_IMAGES_CHOICE_BOTH,       "download to user-defined location and show");
+    list_add(setting, GOWHATSAPP_HANDLE_IMAGES_CHOICE_INLINE,     "download to temporary location and show");
+    list_add(setting, GOWHATSAPP_HANDLE_IMAGES_CHOICE_ATTACHMENT, "download to user-defined location only");
+    purple_account_setting_string_list_set_active_item(
+        PURPLE_ACCOUNT_SETTING_STRING_LIST(setting),
+        GOWHATSAPP_HANDLE_IMAGES_CHOICE_BOTH);
+    purple_account_settings_add_setting(settings, setting);
+
+    add_bool(settings, GOWHATSAPP_DISCARD_OLD_MESSAGES_OPTION,        "Discard old messages",                                   FALSE);
+    add_bool(settings, GOWHATSAPP_GROUP_IS_FILE_ORIGIN_OPTION,        "Treat group as the origin of files",                     TRUE);
+    add_bool(settings, GOWHATSAPP_FAKE_ONLINE_OPTION,                 "Display offline contacts as away",                       TRUE);
+    add_bool(settings, GOWHATSAPP_FETCH_CONTACTS_AFTER_LINKING_OPTION,"Fetch contacts from main device once after linking",     TRUE);
+    add_bool(settings, GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION,"Update contacts every time after login",                 TRUE);
+    add_bool(settings, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION,     "Update buddy name when receiving a message",             TRUE);
+    add_bool(settings, GOWHATSAPP_AUTO_JOIN_CHAT_OPTION,              "Automatically join all chats",                           FALSE);
+    add_bool(settings, GOWHATSAPP_IGNORE_STATUS_BROADCAST_OPTION,     "Ignore status broadcasts",                               TRUE);
+    add_bool(settings, GOWHATSAPP_BRIDGE_COMPATIBILITY_OPTION,        "Protocol bridge compatibility mode",                     FALSE);
+    add_bool(settings, GOWHATSAPP_DISPLAY_MESSAGE_ID_OPTION,          "Display message ID",                                     FALSE);
+
+    return settings;
 }
