@@ -24,8 +24,8 @@ add_library(${TARGET_NAME} SHARED
     "login.c"
     "commands.c"
     "presence.c"
+    "groups.c"
     # TODO(libpurple-3): port the files below.
-    # "groups.c"
     # "handle_attachment.c"
     # "send_file.c"
 )

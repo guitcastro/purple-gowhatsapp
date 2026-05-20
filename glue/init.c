@@ -121,19 +121,6 @@ purple_gowhatsapp_unload(G_GNUC_UNUSED GPluginPlugin *plugin,
  * to libpurple 3. Each TODO marker below should be removed once the
  * corresponding .c file is rewritten and re-added to glue/CMakeLists.txt.
  */
-/* TODO(libpurple-3): port glue/groups.c. */
-PurpleRoomlist *
-gowhatsapp_roomlist_get_list(G_GNUC_UNUSED PurpleConnection *pc)
-{
-    return NULL;
-}
-
-void
-gowhatsapp_handle_group(G_GNUC_UNUSED PurpleConnection *pc,
-                        G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
-{
-}
-
 /* TODO(libpurple-3): port glue/handle_attachment.c. */
 void
 gowhatsapp_handle_attachment(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)

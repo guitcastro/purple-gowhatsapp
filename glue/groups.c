@@ -1,276 +1,214 @@
 #include "gowhatsapp.h"
-#include "libwhatsmeow.h" // for gowhatsapp_go_query_groups
+#include "constants.h"
+#include "libwhatsmeow.h" // for gowhatsapp_go_query_group_participants / _query_groups / _get_display_name
 
-// Core functions for working with chats in purple
+#include "purplegowhatsappconnection.h"
 
 /*
- * According to libpurple/prpl.h, this shall return a list of identifiers 
- * needed to join a group chat. By default, the first element of this list 
- * must be the identifying aspect, see purple_blist_find_chat in 
- * libpurple/blist.c. This is explicitly reimplemented by gowhatsapp_find_blist_chat.
- * For compatibility reasons, the WhatsApp JID remains the first element.
- * 
- * bitlbee expects this function to be present.
- * 
- * Borrowed from
- * https://github.com/hoehermann/libpurple-signald/blob/master/groups.c
+ * libpurple 3 dropped both the PurpleRoomlist family (no replacement; the
+ * channel-discovery use case is mostly handled via
+ * PurpleChannelJoinDetails on the PurpleProtocolConversation interface)
+ * and the static proto_chat_entry / chat_info_defaults plumbing that hung
+ * off PurplePluginProtocolInfo. Group conversations themselves now live
+ * as PURPLE_CONVERSATION_TYPE_CHANNEL entries in the
+ * PurpleConversationManager, with members tracked via
+ * PurpleConversationMembers.
  */
-GList * gowhatsapp_chat_info(PurpleConnection *pc)
-{
-    GList *infos = NULL;
 
-    struct proto_chat_entry *pce;
-
-    pce = g_new0(struct proto_chat_entry, 1); // MEMCHECK: infos takes ownership
-    pce->label = "JID";
-    pce->identifier = "name";
-    pce->required = TRUE;
-    infos = g_list_append(infos, pce);
-
-    pce = g_new0(struct proto_chat_entry, 1); // MEMCHECK: infos takes ownership
-    pce->label = "Group Name";
-    pce->identifier = "topic";
-    pce->required = TRUE;
-    infos = g_list_append(infos, pce);
-
-    return infos; // MEMCHECK: caller takes ownership
-}
-
-/*
- * Takes a purple chat_name and prepares all information necessary to join the chat with that name.
- * 
- * Ideally, this would take the human readable WhatsApp group name and look up the appropriate JID.
- * For now, it expects the chat_name to be the group JID and simply wraps it.
- * 
- * The "topic" field denoting the human readable WhatsApp group name remains empty
- * since we do not know it here.
- * 
- * Note: In purple, "name" is implicitly set to the roomlist room name in 
- * purple_roomlist_room_join, see libpurple/roomlist.c
- * 
- * bitlbee expects this function to be present.
- */
-GHashTable * gowhatsapp_chat_info_defaults(PurpleConnection *pc, const char *chat_name) 
-{
-    GHashTable *defaults = g_hash_table_new_full( // MEMCHECK: caller takes ownership
-        g_str_hash, g_str_equal, NULL, g_free
-    );
-    if (chat_name != NULL) {
-        g_hash_table_insert(defaults, "name", g_strdup(chat_name)); // MEMCHECK: g_strdup'ed string released by GHashTable's value_destroy_func g_free (see above)
-        g_hash_table_insert(defaults, "topic", g_strdup("")); // MEMCHECK: g_strdup'ed string released by GHashTable's value_destroy_func g_free (see above)
-    }
-    return defaults;
-}
-
-/*
- * The user wants to join a chat.
- * 
- * data is a table filled with the information needed to join the chat
- * as defined by chat_info_defaults. We only need the JID.
- * 
- * Note: In purple, "name" is implicitly set to the roomlist room name in 
- * purple_roomlist_room_join, see libpurple/roomlist.c
- * 
- * Since group chat participation is handled by WhatsApp, this function
- * does not actually send any requests to the server.
- */
-void gowhatsapp_join_chat(PurpleConnection *pc, GHashTable *data) {
-    const char *remoteJid = g_hash_table_lookup(data, "name");
-    if (remoteJid != NULL) {
-        // add chat to buddy list (optional)
-        PurpleAccount *account = purple_connection_get_account(pc);
-        const char *topic = g_hash_table_lookup(data, "topic");
-        if (purple_account_get_bool(account, GOWHATSAPP_UPDATE_BUDDY_ON_MESSAGE_OPTION, TRUE)) {
-            gowhatsapp_ensure_group_chat_in_blist(account, remoteJid, topic);
-        }
-        // create conversation (important)
-        gowhatsapp_enter_group_chat(pc, remoteJid, NULL);
-    }
-}
-
-// Functions for listing rooms
-
-/*
- * This requests a list of rooms representing the WhatsApp group chats.
- * The request is asynchronous. Responses are handled by gowhatsapp_roomlist_add_room.
- * 
- * A purple room has an identifying name – for WhatsApp that is the JID.
- * A purple room has a list of fields – in our case only WhatsApp group name.
- * 
- * Some services like spectrum expect the human readable group name field key to be "topic", 
- * see RoomlistProgress in https://github.com/SpectrumIM/spectrum2/blob/518ba5a/backends/libpurple/main.cpp#L1997
- * In purple, the roomlist field "name" gets overwritten in purple_roomlist_room_join, see libpurple/roomlist.c.
- */
-PurpleRoomlist *
-gowhatsapp_roomlist_get_list(PurpleConnection *pc) {
-    PurpleAccount *account = purple_connection_get_account(pc);
-    WhatsappProtocolData *wpd = (WhatsappProtocolData *)purple_connection_get_protocol_data(pc);
-    g_return_val_if_fail(wpd != NULL, NULL);
-    PurpleRoomlist *roomlist = wpd->roomlist;
-    if (roomlist != NULL) {
-        purple_debug_info(GOWHATSAPP_NAME, "Already getting roomlist.\n");
-        return roomlist;
-    }
-    roomlist = purple_roomlist_new(account); // MEMCHECK: caller takes ownership
-    purple_roomlist_set_in_progress(roomlist, TRUE);
-    GList *fields = NULL;
-    fields = g_list_append(fields, purple_roomlist_field_new( // MEMCHECK: fields takes ownership
-        PURPLE_ROOMLIST_FIELD_STRING, "Group Name", "topic", FALSE
-    ));
-    purple_roomlist_set_fields(roomlist, fields);
-    wpd->roomlist = roomlist;
-    gowhatsapp_go_query_groups(account);
-    return roomlist;
-}
-
-/*
- * This handles incoming WhatsApp group information,
- * adding groups as rooms to the roomlist.
- * 
- * In case there currently is no roomlist to populate, this does nothing.
- */
-void
-gowhatsapp_roomlist_add_room(PurpleConnection *pc, char *remoteJid, char *name) {
-    WhatsappProtocolData *wpd = (WhatsappProtocolData *)purple_connection_get_protocol_data(pc);
-    g_return_if_fail(wpd != NULL);
-    PurpleRoomlist *roomlist = wpd->roomlist;
-    if (roomlist != NULL) {
-        if (remoteJid == NULL) {
-            // list end marker, room-listing is finished and ready
-            purple_roomlist_set_in_progress(roomlist, FALSE);
-            purple_roomlist_unref(roomlist); // unref here, roomlist may remain in ui
-            wpd->roomlist = NULL;
-        } else {
-            PurpleRoomlistRoom *room = purple_roomlist_room_new(PURPLE_ROOMLIST_ROOMTYPE_ROOM, remoteJid, NULL); // MEMCHECK: roomlist takes ownership 
-            // purple_roomlist_room_new sets the room's name
-            purple_roomlist_room_add_field(roomlist, room, name); // this sets the room's title
-            purple_roomlist_room_add(roomlist, room);
-        }
-    }
-}
-
-/*
- * Handle incoming group information.
- * 
- * Group information is requested asynchronously when building the roomlist.
- * 
- * NOTE: The roomlist is requested automatically when the local user status is set to "available".
- */
-void gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg) {
-    // list the group in the roomlist (if it is currently being queried)
-    gowhatsapp_roomlist_add_room(pc, gwamsg->remoteJid, gwamsg->name);
-    // these all cannot handle the group list end marker
-    if (gwamsg->remoteJid != NULL) {
-        if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION, TRUE)) {
-            // adds the group to the buddy list (useful for human-readable titles)
-            gowhatsapp_ensure_group_chat_in_blist(gwamsg->account, gwamsg->remoteJid, gwamsg->name);
-        }
-        // this might be a delayed response to a query for participants of a currently active group chat
-        PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, gwamsg->remoteJid, gwamsg->account);
-        if (conv != NULL) {
-            PurpleConvChat *conv_chat = purple_conversation_get_chat_data(conv);
-            if (conv_chat != NULL) {
-                gowhatsapp_chat_set_participants(conv_chat, gwamsg->participants);
-            }
-        }
-        // automatically join all chats (if user wants to)
-        if (purple_account_get_bool(gwamsg->account, GOWHATSAPP_AUTO_JOIN_CHAT_OPTION, FALSE)) {
-            gowhatsapp_enter_group_chat(pc, gwamsg->remoteJid, gwamsg->participants); 
-        }
-    }
-}
-
-// Helper functions regarding the purple conversation representing a WhatsApp group
-
-/*
- * Adds participants to chat.
- * 
- * NOTE: We cannot selectively add missing users since it looks like on Spectrum 
- * only a remove-readd-cycle will trigger the display name resolution.
- */
-void 
-gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants) {
-    // remove all users
-    purple_conv_chat_clear_users(conv_chat);
-    // now add all current users
-    for(char **participant_ptr = participants; participant_ptr != NULL && *participant_ptr != NULL; participant_ptr++) {
-        PurpleConvChatBuddyFlags flags = 0;
-        purple_conv_chat_add_user(conv_chat, *participant_ptr, NULL, flags, FALSE);
-    }
-}
-
-/*
- * This returns the conversation representing a group chat.
- * 
- * It creates a new conversation if necessary.
- * 
- * purple uses an int to identify conversations, WhatsApp uses the JID.
- * For this reason, the purple chat id is g_str_hash(remoteJid).
- * 
- * The actual JID is stored in the conversation data hash table so it can 
- * be retrieved by get_chat_name (see below).
- */
-PurpleConversation *
-gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants) 
-{
-    PurpleAccount *account = purple_connection_get_account(pc);
-    PurpleConversation *conv = purple_find_conversation_with_account(PURPLE_CONV_TYPE_CHAT, remoteJid, account); // alternatively: purple_find_chat(pc, g_str_hash(remoteJid));
-    if (conv == NULL || (conv != NULL && purple_conversation_get_data(conv, "want-to-rejoin"))) {
-        // use hash of jid for chat id number
-        conv = serv_got_joined_chat(pc, g_str_hash(remoteJid), remoteJid);
-        if (purple_conversation_get_data(conv, "want-to-rejoin")) {
-            // now that we did rejoin, remove the flag
-            // directly accessing conv->data feels wrong, but there is no interface to do so
-            g_hash_table_remove(conv->data, "want-to-rejoin");
-        }
-        if (conv != NULL) {
-            // store the JID so it can be retrieved by get_chat_name
-            purple_conversation_set_data(conv, "name", g_strdup(remoteJid)); // MEMCHECK: this leaks, but there is no mechanism to stop it
-            PurpleConvChat *conv_chat = purple_conversation_get_chat_data(conv);
-            purple_conv_chat_set_nick(conv_chat, purple_account_get_username(account));
-            if (participants == NULL) {
-                // list of participants is empty, request it explicitly and release it immediately
-                char **participants = gowhatsapp_go_query_group_participants(account, (char *)remoteJid);
-                gowhatsapp_chat_set_participants(conv_chat, participants);
-                g_strfreev(participants);
-            } else {
-                // list of participants was given by caller, add particpants have caller release it later
-                gowhatsapp_chat_set_participants(conv_chat, participants);
-            }
-        }
-    }
-    return conv;
-}
-
-/*
- * Get the identifying aspect of a chat (as passed to serv_got_joined_chat) 
- * given the chat_info entries. In WhatsApp, this is the JID.
- * 
- * The JID is stored in the "name" field. In libpurple, this is the default.
- * It is reimplementerd here explicitly since it might be good for compatibility 
- * with bitlbee or spectrum.
+/******************************************************************************
+ * Roomlist — fully stubbed.
  *
- * Borrowed from:
- * https://github.com/matrix-org/purple-matrix/blob/master/libmatrix.c
- */
-char *gowhatsapp_get_chat_name(GHashTable *components)
+ * libpurple 3 has no PurpleRoomlist. Once the channel-join hook is wired
+ * into the protocol GObject we can rebuild the "list of joinable groups"
+ * UX through PurpleChannelJoinDetails instead.
+ *****************************************************************************/
+PurpleRoomlist *
+gowhatsapp_roomlist_get_list(G_GNUC_UNUSED PurpleConnection *pc)
 {
-    const char *jid = g_hash_table_lookup(components, "name");
-    return g_strdup(jid); // MEMCHECK: strdup'ed value is released by caller
+    /* TODO(libpurple-3): replace with PurpleProtocolConversation.get_channel_join_details
+     * + PurpleProtocolConversation.join_channel_async. */
+    return NULL;
 }
 
-/*
- * Borrowed from
- * https://github.com/hoehermann/libpurple-signald/blob/master/groups.c
- */
 void
-gowhatsapp_set_chat_topic(PurpleConnection *pc, int id, const char *topic)
+gowhatsapp_roomlist_add_room(G_GNUC_UNUSED PurpleConnection *pc,
+                             G_GNUC_UNUSED char *remoteJid,
+                             G_GNUC_UNUSED char *name)
 {
-    // Nothing to do here. For some reason this callback has to be
-    // registered if Pidgin is going to enable the "Alias..." menu
-    // option in the conversation.
+    /* TODO(libpurple-3): no-op until the channel-join replacement lands. */
 }
 
-char *gowhatsapp_get_cb_alias(PurpleConnection *connection, int id, const char *who) {
+gchar *
+gowhatsapp_roomlist_serialize(G_GNUC_UNUSED PurpleRoomlistRoom *room)
+{
+    return NULL;
+}
+
+/******************************************************************************
+ * proto_chat_entry-style API — stubbed.
+ *
+ * In libpurple 2 the user-facing "Join a Chat..." dialog was driven off
+ * PurplePluginProtocolInfo.chat_info / chat_info_defaults / join_chat.
+ * libpurple 3 expects PurpleProtocolConversation.get_channel_join_details
+ * to return a PurpleChannelJoinDetails describing the same fields. The
+ * old GList<struct proto_chat_entry *> hand-off has no equivalent.
+ *****************************************************************************/
+GList *
+gowhatsapp_chat_info(G_GNUC_UNUSED PurpleConnection *pc)
+{
+    /* TODO(libpurple-3): expose via PurpleChannelJoinDetails. */
+    return NULL;
+}
+
+GHashTable *
+gowhatsapp_chat_info_defaults(G_GNUC_UNUSED PurpleConnection *pc,
+                              G_GNUC_UNUSED const char *chat_name)
+{
+    return NULL;
+}
+
+void
+gowhatsapp_join_chat(G_GNUC_UNUSED PurpleConnection *pc,
+                     G_GNUC_UNUSED GHashTable *data)
+{
+    /* TODO(libpurple-3): the join-channel flow now lives on
+     * PurpleProtocolConversation.join_channel_async. */
+}
+
+char *
+gowhatsapp_get_chat_name(GHashTable *components)
+{
+    if (components == NULL) {
+        return NULL;
+    }
+    const char *jid = g_hash_table_lookup(components, "name");
+    return g_strdup(jid);
+}
+
+void
+gowhatsapp_set_chat_topic(G_GNUC_UNUSED PurpleConnection *pc,
+                          G_GNUC_UNUSED int id,
+                          G_GNUC_UNUSED const char *topic)
+{
+    /* TODO(libpurple-3): there is no per-id lookup any more; the topic
+     * setter lives on PurpleConversation directly. Once a UI path calls
+     * us with a real PurpleConversation, route to purple_conversation_set_topic. */
+}
+
+/******************************************************************************
+ * Group conversation helpers
+ *****************************************************************************/
+static PurpleConversation *
+find_channel(PurpleAccount *account, const char *remoteJid)
+{
+    PurpleConversationManager *manager = purple_core_get_conversation_manager(purple_core_get_default());
+    return purple_conversation_manager_find(manager, account,
+                                            PURPLE_CONVERSATION_TYPE_CHANNEL,
+                                            remoteJid);
+}
+
+void
+gowhatsapp_chat_set_participants(PurpleConvChat *conv_chat, char **participants)
+{
+    if (conv_chat == NULL) {
+        return;
+    }
+    /* In our compat shim PurpleConvChat is a typedef for PurpleConversation. */
+    PurpleConversation *conversation = (PurpleConversation *)conv_chat;
+    PurpleAccount *account = purple_conversation_get_account(conversation);
+    if (account == NULL) {
+        return;
+    }
+    PurpleConversationMembers *members = purple_conversation_get_members(conversation);
+    PurpleContactManager *cm = purple_core_get_contact_manager(purple_core_get_default());
+
+    /* libpurple 3 keeps members as PurpleConversationMember GObjects rather
+     * than the libpurple 2 char-array. We just (re-)add each participant; the
+     * manager's add_member is idempotent if a member for the same contact
+     * info already exists. */
+    for (char **p = participants; p != NULL && *p != NULL; p++) {
+        gboolean found = FALSE;
+        PurpleContact *contact = purple_contact_manager_find_or_create(cm, account, *p, &found);
+        if (contact == NULL) {
+            continue;
+        }
+        PurpleContactInfo *info = PURPLE_CONTACT_INFO(contact);
+        if (purple_conversation_members_find_member(members, info) == NULL) {
+            purple_conversation_members_add_member(members, info, FALSE, NULL);
+        }
+    }
+}
+
+PurpleConversation *
+gowhatsapp_enter_group_chat(PurpleConnection *pc, const char *remoteJid, char **participants)
+{
+    g_return_val_if_fail(pc != NULL, NULL);
+    g_return_val_if_fail(remoteJid != NULL, NULL);
+
+    PurpleAccount *account = purple_connection_get_account(pc);
+    PurpleConversationManager *manager = purple_core_get_conversation_manager(purple_core_get_default());
+
+    PurpleConversation *conversation = find_channel(account, remoteJid);
+    if (conversation == NULL) {
+        conversation = purple_conversation_new(account, PURPLE_CONVERSATION_TYPE_CHANNEL, remoteJid);
+        purple_conversation_manager_add(manager, conversation);
+        g_object_unref(conversation);
+    }
+
+    if (participants == NULL) {
+        char **fetched = gowhatsapp_go_query_group_participants(account, (char *)remoteJid);
+        gowhatsapp_chat_set_participants(conversation, fetched);
+        g_strfreev(fetched);
+    } else {
+        gowhatsapp_chat_set_participants(conversation, participants);
+    }
+    return conversation;
+}
+
+void
+gowhatsapp_handle_group(PurpleConnection *pc, gowhatsapp_message_t *gwamsg)
+{
+    g_return_if_fail(pc != NULL);
+    g_return_if_fail(gwamsg != NULL);
+    g_return_if_fail(gwamsg->account != NULL);
+
+    if (gwamsg->remoteJid == NULL) {
+        /* End-of-list sentinel from whatsmeow. With the roomlist gone there
+         * is nothing to flush here. */
+        return;
+    }
+
+    PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
+
+    if (purple_account_settings_get_boolean(settings,
+                                            GOWHATSAPP_REQUEST_CONTACTS_AFTER_LOGIN_OPTION,
+                                            TRUE)) {
+        gowhatsapp_ensure_group_chat_in_blist(gwamsg->account, gwamsg->remoteJid, gwamsg->name);
+    }
+
+    /* If a conversation is already open, refresh its participant list. */
+    PurpleConversation *conversation = find_channel(gwamsg->account, gwamsg->remoteJid);
+    if (conversation != NULL) {
+        gowhatsapp_chat_set_participants(conversation, gwamsg->participants);
+    }
+
+    if (purple_account_settings_get_boolean(settings, GOWHATSAPP_AUTO_JOIN_CHAT_OPTION, FALSE)) {
+        gowhatsapp_enter_group_chat(pc, gwamsg->remoteJid, gwamsg->participants);
+    }
+}
+
+char *
+gowhatsapp_get_cb_alias(PurpleConnection *connection,
+                        G_GNUC_UNUSED int id,
+                        const char *who)
+{
     return gowhatsapp_go_get_display_name(purple_connection_get_account(connection), (char *)who);
+}
+
+void
+gowhatsapp_free_name(G_GNUC_UNUSED PurpleConversation *conv)
+{
+    /* TODO(libpurple-3): libpurple 2 used to leak the strdup'd "name" key
+     * stored in PurpleConversation's data hash table; there is no
+     * equivalent storage anymore so there is nothing to release here. */
 }
