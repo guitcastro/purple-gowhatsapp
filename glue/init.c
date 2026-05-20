@@ -134,25 +134,11 @@ gowhatsapp_handle_group(G_GNUC_UNUSED PurpleConnection *pc,
 {
 }
 
-/* TODO(libpurple-3): port glue/presence.c. */
-void
-gowhatsapp_handle_presence(G_GNUC_UNUSED PurpleAccount *account,
-                           G_GNUC_UNUSED char *remoteJid,
-                           G_GNUC_UNUSED char available,
-                           G_GNUC_UNUSED time_t last_seen)
-{
-}
-
 /* TODO(libpurple-3): port glue/handle_attachment.c. */
 void
 gowhatsapp_handle_attachment(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
 {
 }
 
-/* TODO(libpurple-3): port glue/blist.c (profile picture handling). */
-void
-gowhatsapp_handle_profile_picture(G_GNUC_UNUSED gowhatsapp_message_t *gwamsg)
-{
-}
 
 GPLUGIN_NATIVE_PLUGIN_DECLARE(purple_gowhatsapp)
