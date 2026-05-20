@@ -22,12 +22,12 @@ add_library(${TARGET_NAME} SHARED
     "qrcode.c"
     "receipt.c"
     "login.c"
+    "commands.c"
     # TODO(libpurple-3): port the files below.
     # "groups.c"
     # "handle_attachment.c"
     # "send_file.c"
     # "presence.c"
-    # "commands.c"
 )
 add_dependencies(${TARGET_NAME} libwhatsmeow)
 

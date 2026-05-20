@@ -46,6 +46,21 @@ gowhatsapp_send_message_async(G_GNUC_UNUSED PurpleProtocolConversation *protocol
         return;
     }
 
+    /* IRC-style ?commands (?contacts, ?logout, …) intercept the message
+     * before it is sent to whatsmeow. */
+    if (is_command(contents)) {
+        PurpleConnection *pc = purple_account_get_connection(account);
+        int rc = execute_command(pc, contents, id, conversation);
+        if (rc == 0) {
+            g_task_return_boolean(task, TRUE);
+        } else {
+            g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                    "command failed (rc=%d)", rc);
+        }
+        g_clear_object(&task);
+        return;
+    }
+
     char *body = build_outgoing_body(account, contents);
     int rc = gowhatsapp_go_send_message(account, (char *)id, body, isGroup);
     g_free(body);
@@ -65,10 +80,6 @@ gowhatsapp_send_message_async(G_GNUC_UNUSED PurpleProtocolConversation *protocol
     }
 
     g_clear_object(&task);
-
-    /* TODO(libpurple-3): port glue/commands.c and re-introduce the
-     * is_command(message) → execute_command() branch from the libpurple 2
-     * gowhatsapp_send_im / gowhatsapp_send_chat entry points. */
 }
 
 gboolean
