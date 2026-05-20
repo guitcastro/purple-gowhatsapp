@@ -172,22 +172,6 @@ gowhatsapp_ensure_buddy_in_blist(G_GNUC_UNUSED PurpleAccount *account,
     return NULL;
 }
 
-/* TODO(libpurple-3): port glue/display_message.c. */
-void
-gowhatsapp_display_text_message(G_GNUC_UNUSED PurpleAccount *account,
-                                G_GNUC_UNUSED const gchar *senderJid,
-                                G_GNUC_UNUSED const gchar *remoteJid,
-                                G_GNUC_UNUSED const gchar *text,
-                                G_GNUC_UNUSED const time_t timestamp,
-                                G_GNUC_UNUSED const gboolean isGroup,
-                                G_GNUC_UNUSED const gboolean isOutgoing,
-                                G_GNUC_UNUSED const gchar *name,
-                                G_GNUC_UNUSED PurpleMessageFlags flags,
-                                G_GNUC_UNUSED const gchar *messageId,
-                                G_GNUC_UNUSED const gboolean escape)
-{
-}
-
 /* TODO(libpurple-3): port glue/presence.c. */
 void
 gowhatsapp_handle_presence(G_GNUC_UNUSED PurpleAccount *account,
