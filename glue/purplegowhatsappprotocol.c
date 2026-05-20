@@ -7,12 +7,23 @@ struct _PurpleGowhatsappProtocol {
     PurpleProtocol parent;
 };
 
+/******************************************************************************
+ * PurpleProtocolConversation Implementation
+ *****************************************************************************/
+static void
+purple_gowhatsapp_protocol_conversation_iface_init(PurpleProtocolConversationInterface *iface)
+{
+    iface->send_message_async  = gowhatsapp_send_message_async;
+    iface->send_message_finish = gowhatsapp_send_message_finish;
+}
+
 G_DEFINE_DYNAMIC_TYPE_EXTENDED(
     PurpleGowhatsappProtocol,
     purple_gowhatsapp_protocol,
     PURPLE_TYPE_PROTOCOL,
     G_TYPE_FLAG_FINAL,
-    {})
+    G_IMPLEMENT_INTERFACE_DYNAMIC(PURPLE_TYPE_PROTOCOL_CONVERSATION,
+                                  purple_gowhatsapp_protocol_conversation_iface_init))
 
 static PurpleConnection *
 purple_gowhatsapp_protocol_create_connection(G_GNUC_UNUSED PurpleProtocol *protocol,

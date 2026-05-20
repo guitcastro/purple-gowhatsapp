@@ -1,56 +1,80 @@
 #include "gowhatsapp.h"
+#include "constants.h"
 #include "libwhatsmeow.h"
 
-static int
-send_message(PurpleConnection *pc, const gchar *who, const gchar *message, gboolean is_group) {
-    char *msg = NULL;
-    if (purple_account_get_bool(purple_connection_get_account(pc), GOWHATSAPP_BRIDGE_COMPATIBILITY_OPTION, FALSE)) {
-        // Bridge Mode: Spectrum allegedly does not do HTML and bitlbee is probably plain-text anyways, so use message as it is, preserving new-lines
-        // see https://github.com/hoehermann/purple-gowhatsapp/issues/257
-        msg = g_strdup(message);
-    } {
-        // Strip HTML similar to these reasons: https://github.com/majn/telegram-purple/issues/12 and https://github.com/majn/telegram-purple/commit/fffe7519d7269cf4e5029a65086897c77f5283ac
-        // Note: This turns newlines into spaces and <br> tags into newlines
-        msg = purple_markup_strip_html(message);
+/*
+ * Strip HTML out of an outgoing message body.
+ *
+ * Pidgin sends formatted text and WhatsApp is a plain-text protocol, so we
+ * mirror the original libpurple 2 logic: if the user has the bridge-
+ * compatibility option set we pass the raw bytes through, otherwise we
+ * route through purple_markup_strip_html (which also turns <br/> into \n).
+ */
+static char *
+build_outgoing_body(PurpleAccount *account, const char *contents)
+{
+    PurpleAccountSettings *settings = purple_account_get_settings(account);
+    gboolean bridge = purple_account_settings_get_boolean(settings,
+                                                          GOWHATSAPP_BRIDGE_COMPATIBILITY_OPTION,
+                                                          FALSE);
+    if (bridge) {
+        return g_strdup(contents);
     }
-    PurpleAccount *account = purple_connection_get_account(pc);
-    char *w = (char *)who; // cgo does not suport const
-    int ret = gowhatsapp_go_send_message(account, w, msg, is_group);
-    g_free(msg);
-    return ret;
+    return purple_markup_strip_html(contents);
 }
 
-int
-gowhatsapp_send_im(PurpleConnection *pc, const gchar *who, const gchar *message, PurpleMessageFlags flags) {
-    if (is_command(message)) {
-        return execute_command(pc, message, who, NULL);
-    } else {
-        return send_message(pc, who, message, FALSE);
-    }
-}
+void
+gowhatsapp_send_message_async(G_GNUC_UNUSED PurpleProtocolConversation *protocol,
+                              PurpleConversation *conversation,
+                              PurpleMessage *message,
+                              GCancellable *cancellable,
+                              GAsyncReadyCallback callback,
+                              gpointer data)
+{
+    GTask *task = g_task_new(protocol, cancellable, callback, data);
 
-int
-gowhatsapp_send_chat(
-    PurpleConnection *pc, int id, const gchar *message, PurpleMessageFlags flags
-) {
-    PurpleConversation *conv = purple_find_chat(pc, id);
-    if (conv != NULL) {
-        gchar *who = (gchar *)purple_conversation_get_data(conv, "name");
-        if (who != NULL) {
-            if (is_command(message)) {
-                return execute_command(pc, message, who, conv);
-            } else {
-                int ret = send_message(pc, who, message, TRUE);
-                if (ret > 0) {
-                    // Group chats need an explicit local echo since the implicit echo is implemented for direct messages only.
-                    // See https://keep.imfreedom.org/pidgin/pidgin/file/v2.14.12/libpurple/conversation.c#l191.
-                    PurpleConvChat *conv_chat = purple_conversation_get_chat_data(conv);
-                    PurpleAccount *account = purple_conversation_get_account(conv);
-                    purple_conv_chat_write(conv_chat, purple_account_get_username(account), message, flags, time(NULL));
-                }
-                return ret;
-            }
+    PurpleAccount *account = purple_conversation_get_account(conversation);
+    const char *id = purple_conversation_get_id(conversation);
+    const char *contents = purple_message_get_contents(message);
+    gboolean isGroup = purple_conversation_get_conversation_type(conversation)
+                       == PURPLE_CONVERSATION_TYPE_CHANNEL;
+
+    if (id == NULL || contents == NULL) {
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                                "missing conversation id or message contents");
+        g_clear_object(&task);
+        return;
+    }
+
+    char *body = build_outgoing_body(account, contents);
+    int rc = gowhatsapp_go_send_message(account, (char *)id, body, isGroup);
+    g_free(body);
+
+    if (rc > 0) {
+        purple_message_set_delivered(message, TRUE);
+        /* Group conversations need an explicit local echo since whatsmeow
+         * does not echo our own messages back to us. DMs already echo via
+         * the gowhatsapp_message_type_text branch in process_message.c. */
+        if (isGroup) {
+            purple_conversation_write_message(conversation, message);
         }
+        g_task_return_boolean(task, TRUE);
+    } else {
+        g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_FAILED,
+                                "gowhatsapp_go_send_message returned %d", rc);
     }
-    return -6; // a negative value to indicate failure. chose ENXIO "no such address"
+
+    g_clear_object(&task);
+
+    /* TODO(libpurple-3): port glue/commands.c and re-introduce the
+     * is_command(message) → execute_command() branch from the libpurple 2
+     * gowhatsapp_send_im / gowhatsapp_send_chat entry points. */
+}
+
+gboolean
+gowhatsapp_send_message_finish(G_GNUC_UNUSED PurpleProtocolConversation *protocol,
+                               GAsyncResult *result,
+                               GError **error)
+{
+    return g_task_propagate_boolean(G_TASK(result), error);
 }

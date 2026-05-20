@@ -66,9 +66,16 @@ void gowhatsapp_tooltip_text(PurpleBuddy *buddy, PurpleNotifyUserInfo *info, gbo
 void gowhatsapp_assume_buddy_away(PurpleAccount *account, PurpleBuddy *buddy);
 void gowhatsapp_for_all_buddies(PurpleAccount *account, void(*func)(PurpleAccount *, PurpleBuddy *));
 
-// send_message
-int gowhatsapp_send_im(PurpleConnection *pc, const gchar *who, const gchar *message, PurpleMessageFlags flags);
-int gowhatsapp_send_chat(PurpleConnection *pc, int id, const gchar *message, PurpleMessageFlags flags);
+// send_message (PurpleProtocolConversation interface)
+void     gowhatsapp_send_message_async(PurpleProtocolConversation *protocol,
+                                       PurpleConversation *conversation,
+                                       PurpleMessage *message,
+                                       GCancellable *cancellable,
+                                       GAsyncReadyCallback callback,
+                                       gpointer data);
+gboolean gowhatsapp_send_message_finish(PurpleProtocolConversation *protocol,
+                                        GAsyncResult *result,
+                                        GError **error);
 
 // handle_attachment
 void gowhatsapp_handle_attachment(gowhatsapp_message_t *gwamsg);
