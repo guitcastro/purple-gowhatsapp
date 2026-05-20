@@ -21,8 +21,8 @@ add_library(${TARGET_NAME} SHARED
     "send_message.c"
     "qrcode.c"
     "receipt.c"
+    "login.c"
     # TODO(libpurple-3): port the files below.
-    # "login.c"
     # "groups.c"
     # "handle_attachment.c"
     # "send_file.c"

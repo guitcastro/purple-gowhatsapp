@@ -121,15 +121,6 @@ purple_gowhatsapp_unload(G_GNUC_UNUSED GPluginPlugin *plugin,
  * to libpurple 3. Each TODO marker below should be removed once the
  * corresponding .c file is rewritten and re-added to glue/CMakeLists.txt.
  */
-/* TODO(libpurple-3): port glue/login.c::gowhatsapp_store_credentials over to
- * the PurpleAccountSettings / PurpleCredentialManager APIs. */
-void
-gowhatsapp_store_credentials(PurpleAccount *account, char *credentials)
-{
-    PurpleAccountSettings *settings = purple_account_get_settings(account);
-    purple_account_settings_set_string(settings, GOWHATSAPP_CREDENTIALS_KEY, credentials);
-}
-
 /* TODO(libpurple-3): port glue/groups.c. */
 PurpleRoomlist *
 gowhatsapp_roomlist_get_list(G_GNUC_UNUSED PurpleConnection *pc)

@@ -23,8 +23,6 @@ typedef struct {
 PurpleAccountSettings *gowhatsapp_get_default_account_settings(void);
 
 // login
-void gowhatsapp_login(PurpleAccount *account);
-void gowhatsapp_close(PurpleConnection *pc);
 void gowhatsapp_store_credentials(PurpleAccount *account, char *credentials);
 
 // qrcode
