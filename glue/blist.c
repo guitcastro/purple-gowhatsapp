@@ -3,23 +3,14 @@
 #include "libwhatsmeow.h"
 
 /*
- * libpurple 3 dropped the tree-shaped buddy list (PurpleGroup → PurpleBuddy
- * / PurpleChat) and replaced it with the flat PurpleContactManager (a
- * GListModel of PurpleContact per account) and PurpleConversationManager
- * (GListModel of PurpleConversation per account). The functions below
- * re-express the gowhatsapp buddy/group helpers against the new model.
- *
- * Things that do not survive the port:
- *  - PurpleGroup ("Whatsapp" parent group): there is no equivalent. We do
- *    not surface a group; the UI groups contacts by tags or by account.
- *  - PurpleBuddy.node arbitrary key/value storage (purple_blist_node_get/
- *    set_string): for now we do not persist a separate server_alias.
- *  - "Fake away" handling for offline contacts. PurplePresence has a new
- *    shape (PurpleSavedPresence + PurplePresencePrimitive) which has to be
- *    ported together with glue/presence.c.
+ * libpurple 3 dropped the tree-shaped buddy list (PurpleGroup → PurpleBuddy /
+ * PurpleChat) and replaced it with the flat PurpleContactManager (a GListModel
+ * of PurpleContact per account). Group chats live as PURPLE_CONVERSATION_TYPE_
+ * CHANNEL entries in PurpleConversationManager. The helpers below speak the
+ * new model directly.
  */
 
-PurpleBuddy *
+PurpleContactInfo *
 gowhatsapp_ensure_buddy_in_blist(PurpleAccount *account, const char *identifier, const char *name)
 {
     g_return_val_if_fail(account != NULL, NULL);
@@ -46,24 +37,22 @@ gowhatsapp_ensure_buddy_in_blist(PurpleAccount *account, const char *identifier,
         }
     }
 
-    /* TODO(libpurple-3): once glue/presence.c lands, subscribe to presence
-     * updates here (was gowhatsapp_subscribe_presence_updates). */
+    /* TODO(libpurple-3): subscribe to presence updates here once the
+     * outbound-presence flow on PurpleConnectionClass::set_presence lands. */
 
-    /* PurpleBuddy is aliased to PurpleContactInfo in purple_compat.h, and
-     * PurpleContact derives from PurpleContactInfo. */
-    return PURPLE_CONTACT_INFO(contact);
+    return info;
 }
 
 void
 gowhatsapp_for_all_buddies(PurpleAccount *account,
-                           void (*func)(PurpleAccount *, PurpleBuddy *))
+                           void (*func)(PurpleAccount *, PurpleContactInfo *))
 {
     g_return_if_fail(account != NULL);
     g_return_if_fail(func != NULL);
 
     PurpleContactManager *manager = purple_core_get_contact_manager(purple_core_get_default());
     GListModel *contacts = purple_contact_manager_get_all(manager, account);
-    if (contacts == NULL) {
+    if (!G_IS_LIST_MODEL(contacts)) {
         return;
     }
 
@@ -90,13 +79,11 @@ gowhatsapp_blist_get_alias(PurpleAccount *account, const char *who)
 }
 
 /*
- * Called by gowhatsapp_handle_group when the protocol learns about a group
- * chat. In libpurple 2 this registered a PurpleChat in the persistent
- * buddy list. In libpurple 3 the equivalent is registering a
- * PURPLE_CONVERSATION_TYPE_CHANNEL conversation with the conversation
- * manager; persistence across restarts is handled by the manager itself.
+ * In libpurple 2 a "group chat in the blist" was a persistent PurpleChat. In
+ * libpurple 3 the persistent representation is a PURPLE_CONVERSATION_TYPE_
+ * CHANNEL conversation living on the PurpleConversationManager.
  */
-PurpleChat *
+PurpleConversation *
 gowhatsapp_ensure_group_chat_in_blist(PurpleAccount *account, const char *remoteJid, const char *topic)
 {
     g_return_val_if_fail(account != NULL, NULL);
@@ -115,11 +102,10 @@ gowhatsapp_ensure_group_chat_in_blist(PurpleAccount *account, const char *remote
     if (topic != NULL) {
         purple_conversation_set_topic(conversation, topic);
     }
-
-    return conversation; /* PurpleChat is aliased to PurpleConversation in purple_compat.h. */
+    return conversation;
 }
 
-PurpleChat *
+PurpleConversation *
 gowhatsapp_find_blist_chat(PurpleAccount *account, const char *jid)
 {
     if (account == NULL || jid == NULL) {
@@ -128,28 +114,4 @@ gowhatsapp_find_blist_chat(PurpleAccount *account, const char *jid)
     PurpleConversationManager *manager = purple_core_get_conversation_manager(purple_core_get_default());
     return purple_conversation_manager_find(manager, account,
                                             PURPLE_CONVERSATION_TYPE_CHANNEL, jid);
-}
-
-/* Stubs kept for the unported callers (presence.c, groups.c). The function
- * signatures still mention PurpleBuddy because the original glue treats
- * PurpleContact ⇔ PurpleBuddy interchangeably during this transitional
- * period (typedef in purple_compat.h). */
-
-void
-gowhatsapp_assume_buddy_away(G_GNUC_UNUSED PurpleAccount *account,
-                             G_GNUC_UNUSED PurpleBuddy *buddy)
-{
-    /* TODO(libpurple-3): port to PurplePresence + PurplePresencePrimitive
-     * once glue/presence.c is rewritten. */
-}
-
-void
-gowhatsapp_add_buddy(G_GNUC_UNUSED PurpleConnection *pc,
-                     G_GNUC_UNUSED PurpleBuddy *buddy,
-                     G_GNUC_UNUSED PurpleGroup *group)
-{
-    /* TODO(libpurple-3): there is no PurpleProtocolClient.add_buddy hook in
-     * libpurple 3. The protocol class learns about new contacts through the
-     * PurpleContactManager directly, so this entire entry point will likely
-     * be removed once the rest of the buddy code lands. */
 }

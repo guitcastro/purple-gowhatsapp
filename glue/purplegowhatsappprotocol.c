@@ -1,7 +1,10 @@
 #include "purplegowhatsappprotocol.h"
 
+#include "constants.h"
 #include "gowhatsapp.h"
 #include "purplegowhatsappconnection.h"
+
+#define PURPLE_GOWHATSAPP_PROTOCOL_DOMAIN (g_quark_from_static_string("purple-gowhatsapp-protocol"))
 
 struct _PurpleGowhatsappProtocol {
     PurpleProtocol parent;
@@ -54,6 +57,37 @@ purple_gowhatsapp_protocol_get_default_account_settings(G_GNUC_UNUSED PurpleProt
     return gowhatsapp_get_default_account_settings();
 }
 
+static gboolean
+purple_gowhatsapp_protocol_validate_account(G_GNUC_UNUSED PurpleProtocol *protocol,
+                                            PurpleAccount *account,
+                                            GError **error)
+{
+    PurpleAccountSettings *settings = purple_account_get_settings(account);
+    const char *phone = purple_account_settings_get_string(settings,
+                                                           GOWHATSAPP_PHONE_NUMBER_OPTION,
+                                                           NULL);
+    if (phone == NULL || phone[0] == '\0') {
+        g_set_error_literal(error, PURPLE_GOWHATSAPP_PROTOCOL_DOMAIN, 0,
+                            "Phone number is required (international format, digits only).");
+        return FALSE;
+    }
+    /* Cheap sanity check: digits only, at least 8 characters. The full
+     * validation lives on the whatsmeow side. */
+    for (const char *p = phone; *p; p++) {
+        if (*p < '0' || *p > '9') {
+            g_set_error_literal(error, PURPLE_GOWHATSAPP_PROTOCOL_DOMAIN, 0,
+                                "Phone number must contain digits only (no '+', spaces or dashes).");
+            return FALSE;
+        }
+    }
+    if (strlen(phone) < 8) {
+        g_set_error_literal(error, PURPLE_GOWHATSAPP_PROTOCOL_DOMAIN, 0,
+                            "Phone number looks too short. Use the international format, digits only.");
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static void
 purple_gowhatsapp_protocol_init(G_GNUC_UNUSED PurpleGowhatsappProtocol *protocol)
 {
@@ -72,6 +106,7 @@ purple_gowhatsapp_protocol_class_init(PurpleGowhatsappProtocolClass *klass)
     protocol_class->create_connection = purple_gowhatsapp_protocol_create_connection;
     protocol_class->get_default_account_settings =
         purple_gowhatsapp_protocol_get_default_account_settings;
+    protocol_class->validate_account = purple_gowhatsapp_protocol_validate_account;
 }
 
 void

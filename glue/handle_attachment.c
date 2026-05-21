@@ -67,16 +67,17 @@ gowhatsapp_attachment_fill_template(const char *template,
                                     const char *sender,
                                     const char *chat_alias,
                                     const char *buddy_alias,
-                                    const char *messageid,
-                                    G_GNUC_UNUSED PurpleMessageFlags flags)
+                                    const char *messageid)
 {
     if (g_strcmp0(remote, sender) == 0) {
         sender = "";
     }
+    /* The "$direction" placeholder used to be filled from PurpleMessageFlags
+     * (SEND vs RECV). libpurple 3 has no flags; sent/received now follows
+     * from comparing the message author's contact id against the account id.
+     * Leave the placeholder empty for now — fill it in once display_message.c
+     * surfaces the direction. */
     const char *direction = "";
-    /* libpurple 3 dropped PurpleMessageFlags; direction is no longer
-     * encoded as flags. Leave the placeholder for now and let the
-     * caller pass an empty string until the new attribute model lands. */
 
     GHashTable *replacements = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
     g_hash_table_insert(replacements, "$home",      (char *)g_get_home_dir());
@@ -125,8 +126,7 @@ download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *loca
         gwamsg->senderJid,
         chat_alias,
         buddy_alias,
-        gwamsg->messageId,
-        0);
+        gwamsg->messageId);
 
     char *error = gowhatsapp_go_download_attachment(gwamsg->account,
                                                     local_path,
@@ -137,7 +137,7 @@ download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *loca
         gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
                                         gwamsg->remoteJid, error,
                                         gwamsg->timestamp, gwamsg->isGroup,
-                                        gwamsg->isOutgoing, gwamsg->name, 0,
+                                        gwamsg->isOutgoing, gwamsg->name,
                                         gwamsg->messageId, TRUE);
     } else {
         PurpleAccountSettings *settings = purple_account_get_settings(gwamsg->account);
@@ -155,7 +155,7 @@ download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *loca
                                                       gwamsg->remoteJid,
                                                       gwamsg->senderJid,
                                                       chat_alias, buddy_alias,
-                                                      gwamsg->messageId, 0);
+                                                      gwamsg->messageId);
         } else {
             url = gowhatsapp_go_url_from_local_path(local_path);
         }
@@ -163,7 +163,7 @@ download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *loca
         gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
                                         gwamsg->remoteJid, url,
                                         gwamsg->timestamp, gwamsg->isGroup,
-                                        gwamsg->isOutgoing, gwamsg->name, 0,
+                                        gwamsg->isOutgoing, gwamsg->name,
                                         gwamsg->messageId, TRUE);
         g_free(url);
 
@@ -172,7 +172,7 @@ download_to_templated_destination(gowhatsapp_message_t *gwamsg, const char *loca
             gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid,
                                             gwamsg->remoteJid, gwamsg->text,
                                             gwamsg->timestamp, gwamsg->isGroup,
-                                            gwamsg->isOutgoing, gwamsg->name, 0,
+                                            gwamsg->isOutgoing, gwamsg->name,
                                             gwamsg->messageId, TRUE);
         }
 
@@ -215,7 +215,7 @@ gowhatsapp_handle_attachment(gowhatsapp_message_t *gwamsg)
                                     gwamsg->remoteJid,
                                     "(attachment received but no download path is configured)",
                                     gwamsg->timestamp, gwamsg->isGroup,
-                                    gwamsg->isOutgoing, gwamsg->name, 0,
+                                    gwamsg->isOutgoing, gwamsg->name,
                                     gwamsg->messageId, TRUE);
     gowhatsapp_go_delete_handle(gwamsg->download_handle);
     gwamsg->download_handle = 0;

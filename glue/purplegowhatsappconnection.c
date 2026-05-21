@@ -60,9 +60,13 @@ purple_gowhatsapp_connection_connect(PurpleConnection *purple_connection,
                                                      GOWHATSAPP_CREDENTIALS_KEY,
                                                      NULL);
 
-    /* libpurple 3 dropped the dedicated "username" concept; the account's ID
-     * (set at account creation) is the stable identifier we hand to whatsmeow. */
-    username = (char *)purple_contact_info_get_id(PURPLE_CONTACT_INFO(account));
+    /* whatsmeow identifies the WhatsApp account by phone number. Read it
+     * from the dedicated account setting that options.c exposes at the top
+     * of the editor (libpurple 3 has no "account name" widget on its own,
+     * each protocol owns the identity field — XMPP uses JID, etc.). */
+    username = (char *)purple_account_settings_get_string(
+        purple_account_get_settings(account),
+        GOWHATSAPP_PHONE_NUMBER_OPTION, NULL);
     user_dir = (char *)g_get_user_data_dir();
     gowhatsapp_go_login(account, user_dir, username, (char *)credentials, NULL);
     gowhatsapp_receipts_init(purple_connection);
@@ -82,9 +86,13 @@ purple_gowhatsapp_connection_disconnect(PurpleConnection *purple_connection,
     g_return_val_if_fail(PURPLE_GOWHATSAPP_IS_CONNECTION(purple_connection), FALSE);
 
     account = purple_connection_get_account(purple_connection);
-    /* libpurple 3 dropped the dedicated "username" concept; the account's ID
-     * (set at account creation) is the stable identifier we hand to whatsmeow. */
-    username = (char *)purple_contact_info_get_id(PURPLE_CONTACT_INFO(account));
+    /* whatsmeow identifies the WhatsApp account by phone number. Read it
+     * from the dedicated account setting that options.c exposes at the top
+     * of the editor (libpurple 3 has no "account name" widget on its own,
+     * each protocol owns the identity field — XMPP uses JID, etc.). */
+    username = (char *)purple_account_settings_get_string(
+        purple_account_get_settings(account),
+        GOWHATSAPP_PHONE_NUMBER_OPTION, NULL);
     user_dir = (char *)g_get_user_data_dir();
     gowhatsapp_go_close(account, user_dir, username);
 

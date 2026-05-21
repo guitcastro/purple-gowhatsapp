@@ -111,8 +111,12 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
             break;
         case gowhatsapp_message_type_name:
             if (gwamsg->remoteJid == NULL) {
+                /* End-of-contact-list sentinel from whatsmeow; the account is
+                 * fully synced and can be marked ready. The libpurple 2 code
+                 * also kicked off purple_roomlist population here, but
+                 * PurpleRoomlist is gone in libpurple 3. Group chats now
+                 * arrive via the gowhatsapp_message_type_group branch. */
                 gowhatsapp_connection_set_online(pc);
-                gowhatsapp_roomlist_get_list(pc);
             } else {
                 gowhatsapp_ensure_buddy_in_blist(gwamsg->account, gwamsg->remoteJid, gwamsg->name);
             }
@@ -125,17 +129,18 @@ gowhatsapp_process_message(gowhatsapp_message_t *gwamsg)
             if (!gowhatsapp_message_is_old(gwamsg)) {
                 gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid,
                                                 gwamsg->text, gwamsg->timestamp, gwamsg->isGroup,
-                                                gwamsg->isOutgoing, gwamsg->name, 0,
+                                                gwamsg->isOutgoing, gwamsg->name,
                                                 gwamsg->messageId, TRUE);
             }
             break;
         case gowhatsapp_message_type_system:
-            /* TODO(libpurple-3): PurpleMessageFlags is gone; system-message marking
-             * needs to be expressed via the new PurpleMessage attribute API once
-             * display_message.c is ported. */
+            /* TODO(libpurple-3): system-message marking used to flow via the
+             * PURPLE_MESSAGE_SYSTEM bit on PurpleMessageFlags; libpurple 3
+             * carries that as a PurpleMessage attribute that display_message.c
+             * does not yet build. */
             gowhatsapp_display_text_message(gwamsg->account, gwamsg->senderJid, gwamsg->remoteJid,
                                             gwamsg->text, gwamsg->timestamp, gwamsg->isGroup,
-                                            gwamsg->isOutgoing, gwamsg->name, 0,
+                                            gwamsg->isOutgoing, gwamsg->name,
                                             gwamsg->messageId, TRUE);
             break;
         case gowhatsapp_message_type_typing:

@@ -7,11 +7,26 @@
  * Whether the given pointer actually refers to an existing account.
  */
 int gowhatsapp_account_exists(PurpleAccount *account) {
-    PurpleAccountManager *manager = purple_core_get_account_manager(purple_core_get_default());
-    if (manager == NULL) {
+    PurpleCore *core = purple_core_get_default();
+    if (core == NULL || !PURPLE_IS_CORE(core)) {
+        /* During Pidgin shutdown the core has already been torn down but
+         * pending whatsmeow goroutines may still try to deliver messages.
+         * Treat those as "account is gone" so they get dropped quietly. */
         return 0;
     }
-    GListModel *accounts = purple_account_manager_get_connected_accounts(manager);
+    PurpleAccountManager *manager = purple_core_get_account_manager(core);
+    if (!PURPLE_IS_ACCOUNT_MANAGER(manager)) {
+        return 0;
+    }
+    /* get_connected_accounts() only includes accounts whose connection has
+     * already transitioned to CONNECTED; while a freshly enabled account is
+     * still in CONNECTING (e.g. waiting for the QR-code scan) it is missing
+     * from that list, which would cause us to discard every inbound message.
+     * get_enabled() covers both the connecting and the connected states. */
+    GListModel *accounts = purple_account_manager_get_enabled(manager);
+    if (!G_IS_LIST_MODEL(accounts)) {
+        return 0;
+    }
     guint n = g_list_model_get_n_items(accounts);
     int account_exists = 0;
     for (guint i = 0; i < n && !account_exists; i++) {

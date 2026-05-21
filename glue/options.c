@@ -37,6 +37,12 @@ gowhatsapp_get_default_account_settings(void)
     PurpleAccountSettings *settings = purple_account_settings_new();
     PurpleAccountSetting *setting = NULL;
 
+    /* WhatsApp identity: phone number in international format, digits only
+     * (no leading +, no spaces). E.g. 5511987654321 for +55 11 98765-4321. */
+    add_string(settings, GOWHATSAPP_PHONE_NUMBER_OPTION,
+               "Phone number (international format, digits only)",
+               "");
+
     add_string(settings, GOWHATSAPP_DATABASE_ADDRESS_OPTION,
                "Database address",
                GOWHATSAPP_DATABASE_ADDRESS_DEFAULT);

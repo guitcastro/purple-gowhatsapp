@@ -1,13 +1,16 @@
 #include "gowhatsapp.h"
 #include "constants.h"
-#include "libwhatsmeow.h" // for gowhatsapp_go_send_presence / _subscribe_presence
+#include "libwhatsmeow.h" // for gowhatsapp_go_subscribe_presence / _request_profile_picture
 
 /*
  * libpurple 3 dropped PurpleStatus / PurpleStatusType in favor of
- * PurplePresence + PurplePresencePrimitive. Each PurpleContactInfo
- * (and therefore each PurpleAccount and PurpleContact) has an attached
- * PurplePresence; we drive the primitive directly.
+ * PurplePresence + PurplePresencePrimitive. Each PurpleContactInfo (and
+ * therefore each PurpleAccount and PurpleContact) has an attached
+ * PurplePresence; we drive the primitive directly. Buddy icons moved from
+ * PurpleBuddyIconStore to PurpleImage attached to a PurpleContactInfo via
+ * purple_contact_info_set_avatar.
  */
+
 static PurplePresencePrimitive
 primitive_for_remote(PurpleAccount *account, char online)
 {
@@ -79,21 +82,10 @@ gowhatsapp_handle_profile_picture(gowhatsapp_message_t *gwamsg)
 }
 
 void
-gowhatsapp_tooltip_text(G_GNUC_UNUSED PurpleBuddy *buddy,
-                        G_GNUC_UNUSED PurpleNotifyUserInfo *info,
-                        G_GNUC_UNUSED gboolean full)
-{
-    /* libpurple 3 has no PurpleNotifyUserInfo; the buddy tooltip used to be
-     * extended by appending pairs to it. TODO once the replacement landed
-     * in libpurple 3 (currently no equivalent — protocols expose extra info
-     * via PurpleContactInfo properties surfaced in the UI directly). */
-}
-
-void
-gowhatsapp_subscribe_presence_updates(PurpleAccount *account, PurpleBuddy *buddy)
+gowhatsapp_subscribe_presence_updates(PurpleAccount *account, PurpleContactInfo *contact)
 {
     g_return_if_fail(account != NULL);
-    g_return_if_fail(buddy != NULL);
+    g_return_if_fail(contact != NULL);
 
     PurplePresence *own = purple_contact_info_get_presence(PURPLE_CONTACT_INFO(account));
     if (own == NULL) {
@@ -105,17 +97,17 @@ gowhatsapp_subscribe_presence_updates(PurpleAccount *account, PurpleBuddy *buddy
         return;
     }
 
-    const char *id = purple_contact_info_get_id(PURPLE_CONTACT_INFO(buddy));
+    const char *id = purple_contact_info_get_id(contact);
     if (id != NULL) {
         gowhatsapp_go_subscribe_presence(account, (char *)id);
     }
 }
 
 void
-gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleBuddy *buddy)
+gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleContactInfo *contact)
 {
     g_return_if_fail(account != NULL);
-    g_return_if_fail(buddy != NULL);
+    g_return_if_fail(contact != NULL);
 
     PurpleAccountSettings *settings = purple_account_get_settings(account);
     const char *mode = purple_account_settings_get_string(settings, GOWHATSAPP_ICONS_OPTION,
@@ -124,7 +116,7 @@ gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleBuddy *buddy)
         return;
     }
 
-    const char *id = purple_contact_info_get_id(PURPLE_CONTACT_INFO(buddy));
+    const char *id = purple_contact_info_get_id(contact);
     if (id == NULL) {
         return;
     }
@@ -132,25 +124,4 @@ gowhatsapp_request_profile_picture(PurpleAccount *account, PurpleBuddy *buddy)
      * the previously seen picture id/date to allow whatsmeow to skip
      * re-downloading. Pass empty strings; whatsmeow will always fetch. */
     gowhatsapp_go_request_profile_picture(account, (char *)id, "", "");
-}
-
-/*
- * Own outbound presence. In libpurple 2 this was hung off the protocol
- * vtable (.set_status = gowhatsapp_set_presence) and called with a
- * PurpleStatus *. libpurple 3 routes the same change through
- * PurpleConnectionClass::set_presence, which would receive a
- * PurpleSavedPresence instead. The connection class is not yet wiring
- * that hook up, so this function is kept around (with its legacy
- * PurpleStatus parameter, opaqued via purple_compat.h) to satisfy the
- * commands.c / process_message.c TODO call sites once they are
- * re-enabled.
- */
-void
-gowhatsapp_set_presence(G_GNUC_UNUSED PurpleAccount *account,
-                        G_GNUC_UNUSED PurpleStatus *status)
-{
-    /* TODO(libpurple-3): port to PurpleConnectionClass::set_presence with
-     * PurpleSavedPresence + PurplePresencePrimitive. Subscribe to remote
-     * presence updates via gowhatsapp_for_all_buddies + the helper above
-     * once the new entry point lands. */
 }

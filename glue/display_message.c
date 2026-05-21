@@ -63,7 +63,6 @@ gowhatsapp_display_text_message(
     const gboolean isGroup,
     G_GNUC_UNUSED const gboolean isOutgoing,
     const gchar *name,
-    G_GNUC_UNUSED PurpleMessageFlags flags,
     const gchar *messageId,
     const gboolean escape)
 {

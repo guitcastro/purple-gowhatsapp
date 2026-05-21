@@ -43,12 +43,20 @@ gowhatsapp_display_qrcode(PurpleAccount *account,
     purple_request_group_add_field(group,
         purple_request_field_string_new("qr_data", "QR Code Data",
                                         qr_data, FALSE));
-    purple_request_group_add_field(group,
+    PurpleRequestField *image_field =
         purple_request_field_image_new("qr_image", "QR Code Image",
-                                       image_data, image_data_len));
+                                       image_data, image_data_len);
+    /* Pidgin renders image fields at native scale unless we override it; the
+     * whatsmeow QR PNG is small (~256px) so push it up enough to be
+     * scannable from a phone camera. */
+    purple_request_field_image_set_scale(PURPLE_REQUEST_FIELD_IMAGE(image_field),
+                                         4, 4);
+    purple_request_group_add_field(group, image_field);
 
-    const char *username =
-        purple_contact_info_get_id(PURPLE_CONTACT_INFO(account));
+    /* purple_account_get_name() returns the user-supplied name (the WhatsApp
+     * phone number on this protocol). purple_contact_info_get_id() would
+     * return the internal account UUID instead. */
+    const char *username = purple_account_get_name(account);
     char *secondary = g_strdup_printf("WhatsApp account %s", username);
 
     gowhatsapp_close_qrcode(account);

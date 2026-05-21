@@ -113,13 +113,4 @@ purple_gowhatsapp_unload(G_GNUC_UNUSED GPluginPlugin *plugin,
     return TRUE;
 }
 
-/*
- * Stubs for unported glue/ files.
- *
- * These satisfy link-time references from already-ported files (notably
- * glue/bridge.c) while the rest of the glue layer is still being ported
- * to libpurple 3. Each TODO marker below should be removed once the
- * corresponding .c file is rewritten and re-added to glue/CMakeLists.txt.
- */
-
 GPLUGIN_NATIVE_PLUGIN_DECLARE(purple_gowhatsapp)
