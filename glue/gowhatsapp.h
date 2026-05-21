@@ -1,6 +1,7 @@
 #pragma once
 
-#include "purple_compat.h"
+#include <purple.h>
+
 #include "bridge.h"
 
 #define GOWHATSAPP_NAME "whatsmeow"  // name to refer to this plug-in (in logs)
